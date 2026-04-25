@@ -9,6 +9,8 @@ import (
 	"strings"
 	"sync"
 
+	"imtty/internal/session"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -67,7 +69,7 @@ func (c *Client) Connect(ctx context.Context) error {
 	return err
 }
 
-func (c *Client) EnsureThread(ctx context.Context, threadID string) (string, error) {
+func (c *Client) EnsureThread(ctx context.Context, threadID string) (ThreadState, error) {
 	var (
 		method string
 		params map[string]any
@@ -75,49 +77,63 @@ func (c *Client) EnsureThread(ctx context.Context, threadID string) (string, err
 	if strings.TrimSpace(threadID) == "" {
 		method = "thread/start"
 		params = map[string]any{
-			"cwd":                  c.cwd,
-			"approvalPolicy":       "on-request",
-			"experimentalRawEvents": false,
+			"cwd":                    c.cwd,
+			"approvalPolicy":         "on-request",
+			"experimentalRawEvents":  false,
 			"persistExtendedHistory": false,
 		}
 	} else {
 		method = "thread/resume"
 		params = map[string]any{
-			"threadId":             threadID,
-			"cwd":                  c.cwd,
-			"approvalPolicy":       "on-request",
+			"threadId":               threadID,
+			"cwd":                    c.cwd,
+			"approvalPolicy":         "on-request",
 			"persistExtendedHistory": false,
 		}
 	}
 
 	result, err := c.call(ctx, method, params)
 	if err != nil {
-		return "", err
+		return ThreadState{}, err
 	}
 
 	threadMap, ok := objectField(result.Result, "thread")
 	if !ok {
-		return "", errors.New("missing thread in response")
+		return ThreadState{}, errors.New("missing thread in response")
 	}
 	newThreadID, _ := threadMap["id"].(string)
 	if strings.TrimSpace(newThreadID) == "" {
-		return "", errors.New("missing thread id in response")
+		return ThreadState{}, errors.New("missing thread id in response")
 	}
 
 	c.mu.Lock()
 	c.threadID = newThreadID
+	c.pendingApproval = nil
 	c.mu.Unlock()
-	return newThreadID, nil
+	return ThreadState{
+		ThreadID:  newThreadID,
+		Cwd:       stringValue(result.Result["cwd"]),
+		Model:     stringValue(result.Result["model"]),
+		Reasoning: stringValue(result.Result["reasoningEffort"]),
+	}, nil
+}
+
+func (c *Client) StartFreshThread(ctx context.Context) (ThreadState, error) {
+	return c.EnsureThread(ctx, "")
 }
 
 func (c *Client) StartTurn(ctx context.Context, text string) error {
+	return c.StartTurnWithOptions(ctx, text, TurnOptions{})
+}
+
+func (c *Client) StartTurnWithOptions(ctx context.Context, text string, options TurnOptions) error {
 	return c.StartTurnInputs(ctx, []TurnInput{{
 		Type: "text",
 		Text: text,
-	}})
+	}}, options)
 }
 
-func (c *Client) StartTurnInputs(ctx context.Context, inputs []TurnInput) error {
+func (c *Client) StartTurnInputs(ctx context.Context, inputs []TurnInput, options TurnOptions) error {
 	c.mu.Lock()
 	threadID := c.threadID
 	c.mu.Unlock()
@@ -148,11 +164,55 @@ func (c *Client) StartTurnInputs(ctx context.Context, inputs []TurnInput) error 
 		return errors.New("turn inputs must not be empty")
 	}
 
-	_, err := c.call(ctx, "turn/start", map[string]any{
+	params := map[string]any{
 		"threadId": threadID,
 		"input":    payloadInputs,
-	})
+	}
+	if strings.TrimSpace(options.Model) != "" {
+		params["model"] = strings.TrimSpace(options.Model)
+	}
+	if strings.TrimSpace(options.Reasoning) != "" {
+		params["effort"] = strings.TrimSpace(options.Reasoning)
+	}
+
+	_, err := c.call(ctx, "turn/start", params)
 	return err
+}
+
+func (c *Client) ModelList(ctx context.Context) ([]ModelInfo, error) {
+	cursor := ""
+	models := make([]ModelInfo, 0, 16)
+	for {
+		params := map[string]any{}
+		if cursor != "" {
+			params["cursor"] = cursor
+		}
+		result, err := c.call(ctx, "model/list", params)
+		if err != nil {
+			return nil, err
+		}
+
+		data, _ := result.Result["data"].([]any)
+		for _, item := range data {
+			payload, ok := item.(map[string]any)
+			if !ok {
+				continue
+			}
+			models = append(models, ModelInfo{
+				ID:               stringValue(payload["id"]),
+				Model:            stringValue(payload["model"]),
+				DisplayName:      stringValue(payload["displayName"]),
+				DefaultReasoning: stringValue(payload["defaultReasoningEffort"]),
+				Supported:        stringArray(payload["supportedReasoningEfforts"]),
+			})
+		}
+
+		cursor = stringValue(result.Result["nextCursor"])
+		if cursor == "" {
+			break
+		}
+	}
+	return models, nil
 }
 
 func (c *Client) ResolveApproval(ctx context.Context, decision Decision) error {
@@ -319,6 +379,24 @@ func (c *Client) handleInboundRequestOrNotification(envelope rpcEnvelope) {
 		return
 	}
 
+	switch envelope.Method {
+	case "thread/tokenUsage/updated":
+		c.events <- Event{
+			Kind: EventTokenUsageUpdated,
+			TokenUsage: session.TokenUsage{
+				ContextWindow: nestedInt64(envelope.Params, "tokenUsage", "modelContextWindow"),
+				TotalTokens:   nestedInt64(envelope.Params, "tokenUsage", "total", "totalTokens"),
+			},
+		}
+		return
+	case "model/rerouted":
+		c.events <- Event{
+			Kind:  EventModelRerouted,
+			Model: stringValue(envelope.Params["toModel"]),
+		}
+		return
+	}
+
 	if envelope.Method != "item/completed" {
 		return
 	}
@@ -372,6 +450,46 @@ func objectField(payload map[string]any, key string) (map[string]any, bool) {
 	}
 	result, ok := value.(map[string]any)
 	return result, ok
+}
+
+func stringValue(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func stringArray(value any) []string {
+	items, _ := value.([]any)
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		if text := stringValue(item); text != "" {
+			result = append(result, text)
+		}
+	}
+	return result
+}
+
+func nestedInt64(payload map[string]any, keys ...string) int64 {
+	current := any(payload)
+	for _, key := range keys {
+		nextMap, ok := current.(map[string]any)
+		if !ok {
+			return 0
+		}
+		current, ok = nextMap[key]
+		if !ok {
+			return 0
+		}
+	}
+	switch value := current.(type) {
+	case float64:
+		return int64(value)
+	case int64:
+		return value
+	case int:
+		return int64(value)
+	default:
+		return 0
+	}
 }
 
 type rpcEnvelope struct {

@@ -12,6 +12,7 @@ import (
 	"strings"
 	"testing"
 
+	"imtty/internal/appserver"
 	"imtty/internal/fileinput"
 	"imtty/internal/session"
 	"imtty/internal/stream"
@@ -189,6 +190,130 @@ func TestWebhookHandlerAllowsEmptyImmediateResponsesForPlainText(t *testing.T) {
 	}
 	if got := replies.texts(42); len(got) != 1 || !strings.Contains(got[0], "已切换到会话 codex-project-a") {
 		t.Fatalf("reply sender texts = %#v, want only /open reply", got)
+	}
+}
+
+func TestWebhookHandlerControlCommandsAndStatus(t *testing.T) {
+	runtime := &fakeSessionRuntime{
+		statuses: map[string]session.Status{
+			"codex-project-a": {
+				View: session.View{
+					Name:    "codex-project-a",
+					Project: "project-a",
+					Root:    "/tmp/project-a",
+					State:   session.StateRunning,
+				},
+				Effective: session.ControlSelection{
+					Model:     "gpt-5.5",
+					Reasoning: "high",
+					PlanMode:  session.PlanModeDefault,
+				},
+				Pending: session.ControlSelection{
+					Model:     "gpt-5.4",
+					Reasoning: "xhigh",
+					PlanMode:  session.PlanModePlan,
+				},
+				Cwd:                 "/Users/jasonyu/workspace/Personal/imtty",
+				Branch:              "main",
+				CodexVersion:        "0.125.0",
+				ThreadID:            "thread-123",
+				HasTokenUsage:       true,
+				TokenUsage:          session.TokenUsage{ContextWindow: 258000, TotalTokens: 188000},
+				LocalWritableAttach: false,
+			},
+		},
+		models: map[string][]appserver.ModelInfo{
+			"codex-project-a": {{
+				ID:               "gpt-5.4",
+				Model:            "gpt-5.4",
+				DefaultReasoning: "high",
+				Supported:        []string{"medium", "high", "xhigh"},
+			}, {
+				ID:               "gpt-5.5",
+				Model:            "gpt-5.5",
+				DefaultReasoning: "high",
+				Supported:        []string{"medium", "high", "xhigh"},
+			}},
+		},
+	}
+	adapter := NewAdapter(session.NewRegistry(map[string]string{
+		"project-a": "/tmp/project-a",
+	}), runtime, &fakeProjectStore{}, nil, nil, nil)
+	handler := NewWebhookHandler("secret-token", adapter, &fakeReplySender{}, log.New(io.Discard, "", 0))
+
+	sendTelegramUpdate(t, handler, "secret-token", `/open project-a`)
+
+	response := sendTelegramUpdate(t, handler, "secret-token", `/status`)
+	if !strings.Contains(response.Responses[0], "模型: gpt-5.5") || !strings.Contains(response.Responses[0], "待生效模型: gpt-5.4") {
+		t.Fatalf("status response = %#v, want detailed control state", response.Responses)
+	}
+	if !strings.Contains(response.Responses[0], "窗口大小: 258K") || !strings.Contains(response.Responses[0], "已用 Tokens: 188K") {
+		t.Fatalf("status response = %#v, want token usage stats", response.Responses)
+	}
+
+	response = sendTelegramUpdate(t, handler, "secret-token", `/model`)
+	if !strings.Contains(response.Responses[0], "可用模型：") || !strings.Contains(response.Responses[0], "gpt-5.4") {
+		t.Fatalf("model response = %#v, want model list", response.Responses)
+	}
+
+	response = sendTelegramUpdate(t, handler, "secret-token", `/reasoning`)
+	if !strings.Contains(response.Responses[0], "支持的 reasoning: medium, high, xhigh") {
+		t.Fatalf("reasoning response = %#v, want supported reasoning", response.Responses)
+	}
+
+	response = sendTelegramUpdate(t, handler, "secret-token", `/plan_mode`)
+	if !strings.Contains(response.Responses[0], "当前计划模式: default") {
+		t.Fatalf("plan mode response = %#v, want current plan mode", response.Responses)
+	}
+
+	response = sendTelegramUpdate(t, handler, "secret-token", `/model gpt-5.4`)
+	if !strings.Contains(response.Responses[0], "已设置待生效模型") {
+		t.Fatalf("set model response = %#v, want set-model ack", response.Responses)
+	}
+
+	response = sendTelegramUpdate(t, handler, "secret-token", `/reasoning xhigh`)
+	if !strings.Contains(response.Responses[0], "已设置待生效 reasoning") {
+		t.Fatalf("set reasoning response = %#v, want set-reasoning ack", response.Responses)
+	}
+
+	response = sendTelegramUpdate(t, handler, "secret-token", `/plan_mode plan`)
+	if !strings.Contains(response.Responses[0], "已设置待生效计划模式") {
+		t.Fatalf("set plan_mode response = %#v, want set-plan-mode ack", response.Responses)
+	}
+}
+
+func TestWebhookHandlerClearResetsThreadForActiveSession(t *testing.T) {
+	runtime := &fakeSessionRuntime{
+		statuses: map[string]session.Status{
+			"codex-project-a": {
+				View: session.View{
+					Name:    "codex-project-a",
+					Project: "project-a",
+					Root:    "/tmp/project-a",
+					State:   session.StateRunning,
+				},
+				ThreadID: "thread-456",
+				Effective: session.ControlSelection{
+					Model:     "gpt-5.5",
+					Reasoning: "high",
+					PlanMode:  session.PlanModeDefault,
+				},
+			},
+		},
+	}
+	adapter := NewAdapter(session.NewRegistry(map[string]string{
+		"project-a": "/tmp/project-a",
+	}), runtime, &fakeProjectStore{}, nil, nil, nil)
+	handler := NewWebhookHandler("secret-token", adapter, &fakeReplySender{}, log.New(io.Discard, "", 0))
+
+	sendTelegramUpdate(t, handler, "secret-token", `/open project-a`)
+
+	response := sendTelegramUpdate(t, handler, "secret-token", `/clear`)
+	if !strings.Contains(response.Responses[0], "已清空当前对话上下文") || !strings.Contains(response.Responses[0], "thread-456") {
+		t.Fatalf("clear response = %#v, want clear ack with new thread id", response.Responses)
+	}
+	if len(runtime.cleared) != 1 || runtime.cleared[0] != "codex-project-a" {
+		t.Fatalf("runtime.cleared = %#v, want codex-project-a", runtime.cleared)
 	}
 }
 
@@ -516,6 +641,7 @@ type fakeSessionRuntime struct {
 	opened          []string
 	closed          []string
 	killed          []string
+	cleared         []string
 	submitted       map[string][]string
 	images          map[string][]submittedImage
 	approvals       map[string][]string
@@ -525,6 +651,8 @@ type fakeSessionRuntime struct {
 	submitErr       error
 	approvalErr     error
 	killErr         error
+	statuses        map[string]session.Status
+	models          map[string][]appserver.ModelInfo
 }
 
 func (f *fakeSessionRuntime) OpenSession(_ context.Context, chatID int64, view session.View) error {
@@ -578,6 +706,70 @@ func (f *fakeSessionRuntime) SubmitApproval(_ context.Context, _ int64, view ses
 	}
 	f.approvals[view.Name] = append(f.approvals[view.Name], text)
 	return true, nil
+}
+
+func (f *fakeSessionRuntime) Status(_ context.Context, view session.View) (session.Status, error) {
+	if f.statuses != nil {
+		if status, ok := f.statuses[view.Name]; ok {
+			return status, nil
+		}
+	}
+	return session.Status{
+		View: view,
+		Effective: session.ControlSelection{
+			Model:     "gpt-5.5",
+			Reasoning: "high",
+			PlanMode:  session.PlanModeDefault,
+		},
+		Cwd:          view.Root,
+		CodexVersion: "0.125.0",
+		ThreadID:     "thread-123",
+	}, nil
+}
+
+func (f *fakeSessionRuntime) ListModels(_ context.Context, view session.View) ([]appserver.ModelInfo, error) {
+	if f.models != nil {
+		if models, ok := f.models[view.Name]; ok {
+			return models, nil
+		}
+	}
+	return []appserver.ModelInfo{{
+		ID:               "gpt-5.5",
+		Model:            "gpt-5.5",
+		DisplayName:      "GPT-5.5",
+		DefaultReasoning: "high",
+		Supported:        []string{"medium", "high", "xhigh"},
+	}}, nil
+}
+
+func (f *fakeSessionRuntime) SetModel(ctx context.Context, view session.View, model string) (session.Status, string, error) {
+	status, _ := f.Status(ctx, view)
+	status.Pending.Model = model
+	return status, "", nil
+}
+
+func (f *fakeSessionRuntime) SetReasoning(ctx context.Context, view session.View, reasoning string) (session.Status, error) {
+	status, _ := f.Status(ctx, view)
+	status.Pending.Reasoning = reasoning
+	return status, nil
+}
+
+func (f *fakeSessionRuntime) SetPlanMode(ctx context.Context, view session.View, mode session.PlanMode) (session.Status, error) {
+	status, _ := f.Status(ctx, view)
+	status.Pending.PlanMode = mode
+	if mode == session.PlanModePlan {
+		status.Pending.Reasoning = "xhigh"
+	}
+	return status, nil
+}
+
+func (f *fakeSessionRuntime) ClearThread(ctx context.Context, view session.View) (session.Status, error) {
+	f.cleared = append(f.cleared, view.Name)
+	status, _ := f.Status(ctx, view)
+	status.ThreadID = "thread-456"
+	status.HasTokenUsage = false
+	status.TokenUsage = session.TokenUsage{}
+	return status, nil
 }
 
 func (f *fakeSessionRuntime) IsLocallyAttached(_ context.Context, sessionName string) (bool, error) {

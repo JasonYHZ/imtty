@@ -72,7 +72,8 @@
 
 - `/close`：解绑当前 active session，不强杀底层 `tmux session`。
 - `/kill`：终止当前 active session 对应的 Codex/tmux 会话，并彻底删除该会话记录。
-- `/status`：返回当前 active session、所有已知 session 状态和建议下一步动作。
+- `/clear`：为当前 active session 立即创建一个新的空 thread，但保留底层 tmux/Codex app-server 进程。
+- `/status`：返回当前 active session 的详细状态、当前 Codex 窗口统计和建议下一步动作。
 - Mini App：提供结构化按钮、列表和表单，用于触发与上述命令等价的控制动作。
 
 ## 7. 对外命令面
@@ -86,7 +87,11 @@ MVP 只定义以下 bot 命令：
 - `/open <project>`: 创建或绑定该项目的 session，并将其设为 active。
 - `/close`: 关闭当前 IM 绑定，不销毁底层 session。
 - `/kill`: 杀掉当前 active session 对应的 tmux/Codex 会话，并从已知会话列表中移除。
-- `/status`: 查看当前 active session 与整体 session 状态。
+- `/clear`: 立即清空当前 active session 的对话 thread，并切换到新的 thread id。
+- `/status`: 查看当前 active session 的详细状态与窗口统计。
+- `/model [model-id]`: 查看或设置当前 active session 的待生效模型。
+- `/reasoning [effort]`: 查看或设置当前 active session 的待生效 reasoning。
+- `/plan_mode [default|plan]`: 查看或设置当前 active session 的待生效 plan 预设。
 
 MVP 对外输入模型只允许五类：
 
@@ -117,6 +122,9 @@ MVP 不定义：
 - `/open` 会切换 active session。
 - `/close` 只解除绑定，不销毁后台 session。
 - `/kill` 会删除该 project 的现有 session 记录；后续需要重新 `/open` 才会重新创建。
+- `/clear` 只重置当前 active session 的 thread，不重建 tmux session，也不切换 active 绑定。
+- `/model`、`/reasoning`、`/plan_mode` 只作用于当前 active session。
+- 这些动态控制不会伪造空 turn；它们会在下一条真实用户输入时随 `turn/start` 一起生效。
 
 ### 8.3 状态定义
 
@@ -154,6 +162,7 @@ MVP 不定义：
 - 当 bridge 已成功把 turn 提交给 Codex 后，Telegram 可显示原生 `typing` 状态，直到最终回复或审批提示返回。
 - commentary、工具调用轨迹、terminal 输出、prompt、状态栏、内部推理和类似 TUI 过程噪音默认不得发到 Telegram。
 - 普通文本成功注入当前 active session 后默认不发送确认回执，避免和短最终回复形成视觉重复。
+- `/status` 追求 app-server 协议支持下的最佳努力，不承诺与 Codex TUI 状态行逐字段完全一致。
 - 出错时要保留最小可读上下文，不能只发“发送失败”。
 - 当本地终端存在可写 attach client 时，Telegram 不允许继续写入该会话。
 - 当本地终端仅存在只读 spectator client 时，Telegram 仍允许继续远程写入该会话。
@@ -228,7 +237,7 @@ MVP 明确不包含：
 4. Bridge 重启后能重新接管已有 tmux session，不要求重启 Codex。
 5. Codex 退出或 tmux 丢失时，IM 侧会收到明确状态提示和下一步恢复动作。
 6. 单用户下可以并存多个 project session，但任一时刻只有一个 active session 绑定到当前 IM 会话。
-7. `/kill` 后该 session 不再出现在 `/list` 或 `/status` 的会话列表中。
+7. `/kill` 后该 session 不再出现在 `/list` 中；如果当前没有 active session，`/status` 只会提示下一步动作。
 8. `/projects` 只显示可打开项目，`/list` 不显示项目白名单。
 9. `/project_add demo /abs/path` 后，`/projects` 能立即看到 `demo`，bridge 重启后仍然保留。
 10. `/project_remove demo` 后，`demo` 会从 `/projects` 中消失，且 `/open demo` 会被拒绝。
@@ -238,3 +247,5 @@ MVP 明确不包含：
 14. Telegram `photo` 和图片型 `document` 能以单张临时图片输入进入当前 active session。
 15. Telegram 文本/代码类 `document` 和 `PDF document` 能以临时文件分析输入进入当前 active session。
 16. 不支持的二进制 `document` 会被明确拒绝。
+17. `/model`、`/reasoning`、`/plan_mode` 能更新当前 active session 的 pending 控制状态，并在下一条真实消息时生效。
+18. `/status` 能输出当前 active session 的 model、reasoning、plan mode、thread id、cwd、branch 以及最佳努力窗口统计。

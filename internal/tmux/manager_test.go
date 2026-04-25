@@ -4,6 +4,8 @@ import (
 	"context"
 	"reflect"
 	"testing"
+
+	"imtty/internal/session"
 )
 
 func TestManagerEnsureSessionCreatesAndStartsAppServerWhenMissing(t *testing.T) {
@@ -34,7 +36,7 @@ func TestManagerEnsureSessionCreatesAndStartsAppServerWhenMissing(t *testing.T) 
 func TestManagerEnsureSessionSkipsCreateWhenSessionExists(t *testing.T) {
 	runner := &fakeRunner{
 		outputs: map[string]runResult{
-			"has-session -t codex-project-a": {},
+			"has-session -t codex-project-a":                 {},
 			"show-options -v -t codex-project-a @imtty_port": {output: []byte("42001\n")},
 		},
 	}
@@ -58,7 +60,7 @@ func TestManagerEnsureSessionSkipsCreateWhenSessionExists(t *testing.T) {
 func TestManagerEnsureSessionRecreatesLegacySessionWithoutMetadata(t *testing.T) {
 	runner := &fakeRunner{
 		outputs: map[string]runResult{
-			"has-session -t codex-project-a":                  {},
+			"has-session -t codex-project-a":                 {},
 			"show-options -v -t codex-project-a @imtty_port": {err: errExit},
 		},
 	}
@@ -86,8 +88,14 @@ func TestManagerEnsureSessionRecreatesLegacySessionWithoutMetadata(t *testing.T)
 func TestManagerSessionMetadataReadsPortAndThreadID(t *testing.T) {
 	runner := &fakeRunner{
 		outputs: map[string]runResult{
-			"show-options -v -t codex-project-a @imtty_port":      {output: []byte("42001\n")},
-			"show-options -v -t codex-project-a @imtty_thread_id": {output: []byte("thread-123\n")},
+			"show-options -v -t codex-project-a @imtty_port":                {output: []byte("42001\n")},
+			"show-options -v -t codex-project-a @imtty_thread_id":           {output: []byte("thread-123\n")},
+			"show-options -v -t codex-project-a @imtty_pending_model":       {output: []byte("gpt-5.5\n")},
+			"show-options -v -t codex-project-a @imtty_pending_reasoning":   {output: []byte("xhigh\n")},
+			"show-options -v -t codex-project-a @imtty_pending_plan_mode":   {output: []byte("plan\n")},
+			"show-options -v -t codex-project-a @imtty_effective_plan_mode": {output: []byte("default\n")},
+			"show-options -v -t codex-project-a @imtty_context_window":      {output: []byte("258000\n")},
+			"show-options -v -t codex-project-a @imtty_total_tokens":        {output: []byte("188000\n")},
 		},
 	}
 
@@ -103,6 +111,21 @@ func TestManagerSessionMetadataReadsPortAndThreadID(t *testing.T) {
 	if info.ThreadID != "thread-123" {
 		t.Fatalf("ThreadID = %q, want %q", info.ThreadID, "thread-123")
 	}
+	if info.Metadata.Pending.Model != "gpt-5.5" {
+		t.Fatalf("Pending.Model = %q, want %q", info.Metadata.Pending.Model, "gpt-5.5")
+	}
+	if info.Metadata.Pending.Reasoning != "xhigh" {
+		t.Fatalf("Pending.Reasoning = %q, want %q", info.Metadata.Pending.Reasoning, "xhigh")
+	}
+	if info.Metadata.Pending.PlanMode != session.PlanModePlan {
+		t.Fatalf("Pending.PlanMode = %q, want %q", info.Metadata.Pending.PlanMode, session.PlanModePlan)
+	}
+	if info.Metadata.EffectivePlanMode != session.PlanModeDefault {
+		t.Fatalf("EffectivePlanMode = %q, want %q", info.Metadata.EffectivePlanMode, session.PlanModeDefault)
+	}
+	if info.Metadata.TokenUsage.ContextWindow != 258000 || info.Metadata.TokenUsage.TotalTokens != 188000 {
+		t.Fatalf("TokenUsage = %#v, want context 258000 total 188000", info.Metadata.TokenUsage)
+	}
 }
 
 func TestManagerSetThreadIDStoresTmuxOption(t *testing.T) {
@@ -115,6 +138,50 @@ func TestManagerSetThreadIDStoresTmuxOption(t *testing.T) {
 
 	want := []string{
 		"set-option -q -t codex-project-a @imtty_thread_id thread-123",
+	}
+	if !reflect.DeepEqual(runner.commands, want) {
+		t.Fatalf("commands = %#v, want %#v", runner.commands, want)
+	}
+}
+
+func TestManagerSetRuntimeMetadataStoresAndClearsTmuxOptions(t *testing.T) {
+	runner := &fakeRunner{}
+	manager := NewManager(runner, "codex-", "codex")
+
+	err := manager.SetRuntimeMetadata(context.Background(), "codex-project-a", session.RuntimeMetadata{
+		Pending: session.ControlSelection{
+			Model:     "gpt-5.5",
+			Reasoning: "xhigh",
+			PlanMode:  session.PlanModePlan,
+		},
+		EffectivePlanMode: session.PlanModeDefault,
+		TokenUsage: session.TokenUsage{
+			ContextWindow: 258000,
+			TotalTokens:   188000,
+		},
+	})
+	if err != nil {
+		t.Fatalf("SetRuntimeMetadata() error = %v", err)
+	}
+
+	err = manager.SetRuntimeMetadata(context.Background(), "codex-project-a", session.RuntimeMetadata{})
+	if err != nil {
+		t.Fatalf("SetRuntimeMetadata(clear) error = %v", err)
+	}
+
+	want := []string{
+		"set-option -q -t codex-project-a @imtty_pending_model gpt-5.5",
+		"set-option -q -t codex-project-a @imtty_pending_reasoning xhigh",
+		"set-option -q -t codex-project-a @imtty_pending_plan_mode plan",
+		"set-option -q -t codex-project-a @imtty_effective_plan_mode default",
+		"set-option -q -t codex-project-a @imtty_context_window 258000",
+		"set-option -q -t codex-project-a @imtty_total_tokens 188000",
+		"set-option -qu -t codex-project-a @imtty_pending_model",
+		"set-option -qu -t codex-project-a @imtty_pending_reasoning",
+		"set-option -qu -t codex-project-a @imtty_pending_plan_mode",
+		"set-option -qu -t codex-project-a @imtty_effective_plan_mode",
+		"set-option -qu -t codex-project-a @imtty_context_window",
+		"set-option -qu -t codex-project-a @imtty_total_tokens",
 	}
 	if !reflect.DeepEqual(runner.commands, want) {
 		t.Fatalf("commands = %#v, want %#v", runner.commands, want)

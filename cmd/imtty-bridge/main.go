@@ -49,7 +49,7 @@ func main() {
 	botClient := telegram.NewBotClient("", cfg.TelegramBotToken, nil)
 	mediaStore := media.NewStore("", 0)
 	documentAnalyzer := fileinput.NewAnalyzer(nil, 0, 0)
-	runtime := appserver.NewRuntime(sessionManager, stream.NewFormatter(cfg.MessageChunkBytes), botClient)
+	runtime := appserver.NewRuntime(sessionManager, stream.NewFormatter(cfg.MessageChunkBytes), botClient, cfg.CodexBin, cfg.PlanModeReasoning)
 	adapter := telegram.NewAdapter(registry, runtime, projectStore, botClient, mediaStore, documentAnalyzer)
 
 	var (

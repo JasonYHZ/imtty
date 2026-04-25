@@ -14,11 +14,12 @@ import (
 )
 
 const (
-	defaultListenAddr       = ":8080"
-	defaultTmuxPrefix       = "codex-"
-	defaultCodexBin         = "codex"
-	defaultMessageChunkSize = 3500
-	defaultFlushInterval    = 500 * time.Millisecond
+	defaultListenAddr        = ":8080"
+	defaultTmuxPrefix        = "codex-"
+	defaultCodexBin          = "codex"
+	defaultPlanModeReasoning = "xhigh"
+	defaultMessageChunkSize  = 3500
+	defaultFlushInterval     = 500 * time.Millisecond
 )
 
 type Config struct {
@@ -32,6 +33,7 @@ type Config struct {
 	ProjectStorePath      string
 	TmuxPrefix            string
 	CodexBin              string
+	PlanModeReasoning     string
 	MessageChunkBytes     int
 	FlushInterval         time.Duration
 }
@@ -47,6 +49,7 @@ type fileConfig struct {
 	ProjectStorePath      string            `toml:"project_store_path"`
 	TmuxPrefix            string            `toml:"tmux_prefix"`
 	CodexBin              string            `toml:"codex_bin"`
+	PlanModeReasoning     string            `toml:"plan_mode_reasoning_effort"`
 	MessageChunkBytes     int               `toml:"message_chunk_bytes"`
 	FlushIntervalMS       int               `toml:"flush_interval_ms"`
 }
@@ -81,6 +84,7 @@ func load(configPath string, getenv func(string) string, getwd func() (string, e
 		ProjectStorePath:  filepath.Join(cwd, ".imtty-projects.json"),
 		TmuxPrefix:        defaultTmuxPrefix,
 		CodexBin:          defaultCodexBin,
+		PlanModeReasoning: defaultPlanModeReasoning,
 		MessageChunkBytes: defaultMessageChunkSize,
 		FlushInterval:     defaultFlushInterval,
 	}
@@ -115,6 +119,9 @@ func load(configPath string, getenv func(string) string, getwd func() (string, e
 		}
 		if raw := strings.TrimSpace(fileCfg.CodexBin); raw != "" {
 			cfg.CodexBin = raw
+		}
+		if raw := strings.TrimSpace(fileCfg.PlanModeReasoning); raw != "" {
+			cfg.PlanModeReasoning = raw
 		}
 		if fileCfg.MessageChunkBytes > 0 {
 			cfg.MessageChunkBytes = fileCfg.MessageChunkBytes
@@ -162,6 +169,9 @@ func load(configPath string, getenv func(string) string, getwd func() (string, e
 	}
 	if raw := strings.TrimSpace(getenv("IMTTY_CODEX_BIN")); raw != "" {
 		cfg.CodexBin = raw
+	}
+	if raw := strings.TrimSpace(getenv("IMTTY_PLAN_MODE_REASONING_EFFORT")); raw != "" {
+		cfg.PlanModeReasoning = raw
 	}
 	if raw := strings.TrimSpace(getenv("IMTTY_MESSAGE_CHUNK_BYTES")); raw != "" {
 		value, err := strconv.Atoi(raw)

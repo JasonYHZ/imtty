@@ -35,13 +35,13 @@ func TestClientConnectAndStartThread(t *testing.T) {
 	}
 	defer client.Close()
 
-	threadID, err := client.EnsureThread(context.Background(), "")
+	threadState, err := client.EnsureThread(context.Background(), "")
 	if err != nil {
 		t.Fatalf("EnsureThread() error = %v", err)
 	}
 
-	if threadID != "thread-123" {
-		t.Fatalf("threadID = %q, want %q", threadID, "thread-123")
+	if threadState.ThreadID != "thread-123" {
+		t.Fatalf("threadID = %q, want %q", threadState.ThreadID, "thread-123")
 	}
 
 	if got := server.methodLog(); !strings.Contains(got, "initialize") || !strings.Contains(got, "thread/start") {
@@ -72,13 +72,13 @@ func TestClientResumeThreadWhenThreadIDExists(t *testing.T) {
 	}
 	defer client.Close()
 
-	threadID, err := client.EnsureThread(context.Background(), "thread-123")
+	threadState, err := client.EnsureThread(context.Background(), "thread-123")
 	if err != nil {
 		t.Fatalf("EnsureThread() error = %v", err)
 	}
 
-	if threadID != "thread-123" {
-		t.Fatalf("threadID = %q, want %q", threadID, "thread-123")
+	if threadState.ThreadID != "thread-123" {
+		t.Fatalf("threadID = %q, want %q", threadState.ThreadID, "thread-123")
 	}
 
 	if got := server.methodLog(); strings.Contains(got, "thread/start") || !strings.Contains(got, "thread/resume") {
@@ -194,8 +194,120 @@ func TestClientStartTurnInputsSendsLocalImageAndCaption(t *testing.T) {
 	if err := client.StartTurnInputs(context.Background(), []TurnInput{
 		{Type: "localImage", Path: "/tmp/test-image.jpg"},
 		{Type: "text", Text: "看看这张图"},
-	}); err != nil {
+	}, TurnOptions{}); err != nil {
 		t.Fatalf("StartTurnInputs() error = %v", err)
+	}
+}
+
+func TestClientStartTurnWithOptionsSendsModelAndReasoningOverride(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+	server.onRequest("thread/start", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{
+			"thread": map[string]any{"id": "thread-123"},
+			"model":  "gpt-5.5",
+		})
+	})
+	server.onRequest("turn/start", func(conn *websocket.Conn, request rpcRequest) {
+		if got := request.Params["model"]; got != "gpt-5.4" {
+			t.Fatalf("model = %#v, want gpt-5.4", got)
+		}
+		if got := request.Params["effort"]; got != "xhigh" {
+			t.Fatalf("effort = %#v, want xhigh", got)
+		}
+		server.reply(conn, request.ID, map[string]any{"turn": map[string]any{"id": "turn-1"}})
+	})
+
+	client := NewClient(server.wsURL(), "/tmp/project-a")
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer client.Close()
+
+	if _, err := client.EnsureThread(context.Background(), ""); err != nil {
+		t.Fatalf("EnsureThread() error = %v", err)
+	}
+	if err := client.StartTurnWithOptions(context.Background(), "hi", TurnOptions{
+		Model:     "gpt-5.4",
+		Reasoning: "xhigh",
+	}); err != nil {
+		t.Fatalf("StartTurnWithOptions() error = %v", err)
+	}
+}
+
+func TestClientModelListAndProtocolEvents(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+	server.onRequest("model/list", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{
+			"data": []map[string]any{{
+				"id":                     "gpt-5.4",
+				"model":                  "gpt-5.4",
+				"displayName":            "GPT-5.4",
+				"defaultReasoningEffort": "high",
+				"supportedReasoningEfforts": []string{
+					"medium",
+					"high",
+					"xhigh",
+				},
+				"description": "test",
+				"hidden":      false,
+				"isDefault":   true,
+			}},
+		})
+	})
+
+	client := NewClient(server.wsURL(), "/tmp/project-a")
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer client.Close()
+
+	models, err := client.ModelList(context.Background())
+	if err != nil {
+		t.Fatalf("ModelList() error = %v", err)
+	}
+	if len(models) != 1 || models[0].Model != "gpt-5.4" || models[0].DefaultReasoning != "high" {
+		t.Fatalf("models = %#v, want one gpt-5.4 default high", models)
+	}
+
+	server.withConn(func(conn *websocket.Conn) {
+		server.notify(conn, "thread/tokenUsage/updated", map[string]any{
+			"threadId": "thread-123",
+			"turnId":   "turn-1",
+			"tokenUsage": map[string]any{
+				"modelContextWindow": 258000,
+				"total": map[string]any{
+					"totalTokens": 188000,
+				},
+			},
+		})
+	})
+	event := waitForEvent(t, client.Events())
+	if event.Kind != EventTokenUsageUpdated || event.TokenUsage.ContextWindow != 258000 || event.TokenUsage.TotalTokens != 188000 {
+		t.Fatalf("event = %#v, want token usage update", event)
+	}
+
+	server.withConn(func(conn *websocket.Conn) {
+		server.notify(conn, "model/rerouted", map[string]any{
+			"threadId":  "thread-123",
+			"turnId":    "turn-1",
+			"fromModel": "gpt-5.5",
+			"toModel":   "gpt-5.4",
+			"reason":    "policy",
+		})
+	})
+	event = waitForEvent(t, client.Events())
+	if event.Kind != EventModelRerouted || event.Model != "gpt-5.4" {
+		t.Fatalf("event = %#v, want reroute to gpt-5.4", event)
 	}
 }
 
@@ -291,13 +403,13 @@ func waitForEvent(t *testing.T, events <-chan Event) Event {
 }
 
 type fakeAppServer struct {
-	t          *testing.T
-	upgrader   websocket.Upgrader
-	server     *httptest.Server
-	conn       *websocket.Conn
-	methods    []string
-	handlers   map[string]func(*websocket.Conn, rpcRequest)
-	responses  chan rpcResponse
+	t         *testing.T
+	upgrader  websocket.Upgrader
+	server    *httptest.Server
+	conn      *websocket.Conn
+	methods   []string
+	handlers  map[string]func(*websocket.Conn, rpcRequest)
+	responses chan rpcResponse
 }
 
 func newFakeAppServer(t *testing.T) *fakeAppServer {

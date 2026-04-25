@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net"
 	"os/exec"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
+
+	"imtty/internal/session"
 )
 
 var errExit = errors.New("tmux command exited with non-zero status")
@@ -36,6 +38,7 @@ func NewManager(runner Runner, prefix string, codexBin string) *Manager {
 type SessionRuntimeInfo struct {
 	Port     int
 	ThreadID string
+	Metadata session.RuntimeMetadata
 }
 
 func (m *Manager) EnsureSession(ctx context.Context, sessionName string, root string) error {
@@ -113,9 +116,46 @@ func (m *Manager) SessionMetadata(ctx context.Context, sessionName string) (Sess
 		return SessionRuntimeInfo{}, err
 	}
 
+	pendingModel, err := m.readOptionalOption(ctx, sessionName, "@imtty_pending_model")
+	if err != nil {
+		return SessionRuntimeInfo{}, err
+	}
+	pendingReasoning, err := m.readOptionalOption(ctx, sessionName, "@imtty_pending_reasoning")
+	if err != nil {
+		return SessionRuntimeInfo{}, err
+	}
+	pendingPlanModeRaw, err := m.readOptionalOption(ctx, sessionName, "@imtty_pending_plan_mode")
+	if err != nil {
+		return SessionRuntimeInfo{}, err
+	}
+	effectivePlanModeRaw, err := m.readOptionalOption(ctx, sessionName, "@imtty_effective_plan_mode")
+	if err != nil {
+		return SessionRuntimeInfo{}, err
+	}
+	contextWindowRaw, err := m.readOptionalOption(ctx, sessionName, "@imtty_context_window")
+	if err != nil {
+		return SessionRuntimeInfo{}, err
+	}
+	totalTokensRaw, err := m.readOptionalOption(ctx, sessionName, "@imtty_total_tokens")
+	if err != nil {
+		return SessionRuntimeInfo{}, err
+	}
+
 	return SessionRuntimeInfo{
 		Port:     port,
 		ThreadID: strings.TrimSpace(threadID),
+		Metadata: session.RuntimeMetadata{
+			Pending: session.ControlSelection{
+				Model:     pendingModel,
+				Reasoning: pendingReasoning,
+				PlanMode:  session.PlanMode(strings.TrimSpace(pendingPlanModeRaw)),
+			},
+			EffectivePlanMode: session.PlanMode(strings.TrimSpace(effectivePlanModeRaw)),
+			TokenUsage: session.TokenUsage{
+				ContextWindow: parseOptionalInt64(contextWindowRaw),
+				TotalTokens:   parseOptionalInt64(totalTokensRaw),
+			},
+		},
 	}, nil
 }
 
@@ -128,6 +168,29 @@ func (m *Manager) SetThreadID(ctx context.Context, sessionName string, threadID 
 	}
 
 	return m.setOption(ctx, sessionName, "@imtty_thread_id", threadID)
+}
+
+func (m *Manager) SetRuntimeMetadata(ctx context.Context, sessionName string, metadata session.RuntimeMetadata) error {
+	if err := m.validateSessionName(sessionName); err != nil {
+		return err
+	}
+
+	if err := m.setOrUnsetOption(ctx, sessionName, "@imtty_pending_model", metadata.Pending.Model); err != nil {
+		return err
+	}
+	if err := m.setOrUnsetOption(ctx, sessionName, "@imtty_pending_reasoning", metadata.Pending.Reasoning); err != nil {
+		return err
+	}
+	if err := m.setOrUnsetOption(ctx, sessionName, "@imtty_pending_plan_mode", string(metadata.Pending.PlanMode)); err != nil {
+		return err
+	}
+	if err := m.setOrUnsetOption(ctx, sessionName, "@imtty_effective_plan_mode", string(metadata.EffectivePlanMode)); err != nil {
+		return err
+	}
+	if err := m.setOrUnsetOption(ctx, sessionName, "@imtty_context_window", formatOptionalInt64(metadata.TokenUsage.ContextWindow)); err != nil {
+		return err
+	}
+	return m.setOrUnsetOption(ctx, sessionName, "@imtty_total_tokens", formatOptionalInt64(metadata.TokenUsage.TotalTokens))
 }
 
 func (m *Manager) HasWritableAttachedClients(ctx context.Context, sessionName string) (bool, error) {
@@ -185,12 +248,35 @@ func (m *Manager) setOption(ctx context.Context, sessionName string, option stri
 	return err
 }
 
+func (m *Manager) unsetOption(ctx context.Context, sessionName string, option string) error {
+	_, err := m.runner.Run(ctx, "set-option", "-qu", "-t", sessionName, option)
+	return err
+}
+
+func (m *Manager) setOrUnsetOption(ctx context.Context, sessionName string, option string, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return m.unsetOption(ctx, sessionName, option)
+	}
+	return m.setOption(ctx, sessionName, option, value)
+}
+
 func (m *Manager) showOption(ctx context.Context, sessionName string, option string) (string, error) {
 	output, err := m.runner.Run(ctx, "show-options", "-v", "-t", sessionName, option)
 	if err != nil {
 		return "", err
 	}
 	return string(output), nil
+}
+
+func (m *Manager) readOptionalOption(ctx context.Context, sessionName string, option string) (string, error) {
+	value, err := m.showOption(ctx, sessionName, option)
+	if errors.Is(err, errExit) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(value), nil
 }
 
 func (m *Manager) validateSessionName(sessionName string) error {
@@ -251,4 +337,22 @@ func allocateLoopbackPort() (int, error) {
 		return 0, errors.New("unexpected listener address type")
 	}
 	return address.Port, nil
+}
+
+func parseOptionalInt64(value string) int64 {
+	if strings.TrimSpace(value) == "" {
+		return 0
+	}
+	parsed, err := strconv.ParseInt(strings.TrimSpace(value), 10, 64)
+	if err != nil || parsed < 0 {
+		return 0
+	}
+	return parsed
+}
+
+func formatOptionalInt64(value int64) string {
+	if value <= 0 {
+		return ""
+	}
+	return strconv.FormatInt(value, 10)
 }

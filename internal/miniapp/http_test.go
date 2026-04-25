@@ -13,6 +13,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"imtty/internal/appserver"
 	"imtty/internal/session"
 	"imtty/internal/telegram"
 )
@@ -312,6 +313,55 @@ func (f *fakeSessionRuntime) SubmitImage(_ context.Context, _ int64, view sessio
 
 func (f *fakeSessionRuntime) SubmitApproval(_ context.Context, _ int64, _ session.View, _ string) (bool, error) {
 	return false, nil
+}
+
+func (f *fakeSessionRuntime) Status(_ context.Context, view session.View) (session.Status, error) {
+	return session.Status{
+		View: view,
+		Effective: session.ControlSelection{
+			Model:     "gpt-5.5",
+			Reasoning: "high",
+			PlanMode:  session.PlanModeDefault,
+		},
+		Cwd:          view.Root,
+		ThreadID:     "thread-123",
+		CodexVersion: "0.125.0",
+	}, nil
+}
+
+func (f *fakeSessionRuntime) ListModels(_ context.Context, _ session.View) ([]appserver.ModelInfo, error) {
+	return []appserver.ModelInfo{{
+		ID:               "gpt-5.5",
+		Model:            "gpt-5.5",
+		DefaultReasoning: "high",
+		Supported:        []string{"medium", "high", "xhigh"},
+	}}, nil
+}
+
+func (f *fakeSessionRuntime) SetModel(ctx context.Context, view session.View, model string) (session.Status, string, error) {
+	status, _ := f.Status(ctx, view)
+	status.Pending.Model = model
+	return status, "", nil
+}
+
+func (f *fakeSessionRuntime) SetReasoning(ctx context.Context, view session.View, reasoning string) (session.Status, error) {
+	status, _ := f.Status(ctx, view)
+	status.Pending.Reasoning = reasoning
+	return status, nil
+}
+
+func (f *fakeSessionRuntime) SetPlanMode(ctx context.Context, view session.View, mode session.PlanMode) (session.Status, error) {
+	status, _ := f.Status(ctx, view)
+	status.Pending.PlanMode = mode
+	return status, nil
+}
+
+func (f *fakeSessionRuntime) ClearThread(ctx context.Context, view session.View) (session.Status, error) {
+	status, _ := f.Status(ctx, view)
+	status.ThreadID = "thread-cleared"
+	status.HasTokenUsage = false
+	status.TokenUsage = session.TokenUsage{}
+	return status, nil
 }
 
 func (f *fakeSessionRuntime) IsLocallyAttached(_ context.Context, _ string) (bool, error) {

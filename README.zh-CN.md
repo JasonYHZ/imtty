@@ -74,9 +74,13 @@ Telegram -> imtty bridge -> tmux session -> Codex app-server
 - `/open <project>` 创建或绑定 `codex-{project}`
 - `/close` 解除当前 active session 绑定
 - `/kill` 终止底层会话并从已知会话列表删除
-- `/status` 查看当前 active session 和已知会话
+- `/clear` 为当前 active session 立即创建一个新的空 thread，但不重建 tmux session
+- `/status` 查看当前 active session 详情和当前 Codex 窗口统计
 - `/list` 只列会话
 - `/projects` 只列允许打开的项目
+- `/model [model-id]` 查看或设置当前 active session 的模型覆盖
+- `/reasoning [effort]` 查看或设置当前 active session 的 reasoning 覆盖
+- `/plan_mode [default|plan]` 查看或设置当前 active session 的 bridge 侧计划预设
 
 ### 项目白名单
 
@@ -92,6 +96,8 @@ Telegram -> imtty bridge -> tmux session -> Codex app-server
 - Codex 工作中 Telegram 会显示原生 `typing`
 - 默认只回 final answer、审批提示和必要状态
 - 终端噪音默认压制
+- model / reasoning / plan mode 的切换会先挂到当前 active session，并在下一条真实消息时生效
+- `/clear` 会立刻把当前 active session 切到新的空 thread，同时保留 tmux session 和当前 effective 控制状态
 - 本地可写 attach 会阻断远程写入和远程 `/kill`
 - 只读旁观命令：
 
@@ -342,7 +348,11 @@ hello
 - `/open <project>`
 - `/close`
 - `/kill`
+- `/clear`
 - `/status`
+- `/model [model-id]`
+- `/reasoning [effort]`
+- `/plan_mode [default|plan]`
 
 ### HTTP 接口
 

@@ -36,6 +36,9 @@ func TestLoadParsesRequiredEnvAndDefaults(t *testing.T) {
 	if cfg.CodexBin != "codex" {
 		t.Fatalf("CodexBin = %q, want %q", cfg.CodexBin, "codex")
 	}
+	if cfg.PlanModeReasoning != "xhigh" {
+		t.Fatalf("PlanModeReasoning = %q, want %q", cfg.PlanModeReasoning, "xhigh")
+	}
 
 	if cfg.MessageChunkBytes <= 0 {
 		t.Fatalf("MessageChunkBytes = %d, want positive", cfg.MessageChunkBytes)
@@ -128,6 +131,7 @@ telegram_webhook_secret = "secret-token"
 telegram_owner_id = 42
 mini_app_base_url = "https://imtty.example.com"
 project_store_path = "state/projects.json"
+plan_mode_reasoning_effort = "xhigh"
 
 [projects]
 imtty = "/tmp/imtty"
@@ -161,6 +165,9 @@ personal = "/tmp/personal"
 
 	if got := cfg.ProjectBrowseRoots["personal"]; got != "/tmp/personal" {
 		t.Fatalf("ProjectBrowseRoots[personal] = %q, want %q", got, "/tmp/personal")
+	}
+	if got := cfg.PlanModeReasoning; got != "xhigh" {
+		t.Fatalf("PlanModeReasoning = %q, want %q", got, "xhigh")
 	}
 }
 

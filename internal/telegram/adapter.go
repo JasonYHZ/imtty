@@ -29,6 +29,12 @@ type SessionRuntime interface {
 	SubmitText(ctx context.Context, chatID int64, view session.View, text string) error
 	SubmitImage(ctx context.Context, chatID int64, view session.View, imagePath string, caption string) error
 	SubmitApproval(ctx context.Context, chatID int64, view session.View, text string) (bool, error)
+	Status(ctx context.Context, view session.View) (session.Status, error)
+	ListModels(ctx context.Context, view session.View) ([]appserver.ModelInfo, error)
+	SetModel(ctx context.Context, view session.View, model string) (session.Status, string, error)
+	SetReasoning(ctx context.Context, view session.View, reasoning string) (session.Status, error)
+	SetPlanMode(ctx context.Context, view session.View, mode session.PlanMode) (session.Status, error)
+	ClearThread(ctx context.Context, view session.View) (session.Status, error)
 	IsLocallyAttached(ctx context.Context, sessionName string) (bool, error)
 	KillSession(ctx context.Context, view session.View) error
 }
@@ -382,11 +388,41 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 		}
 
 		return []string{fmt.Sprintf("已彻底删除会话 %s", view.Name)}
+	case "/clear":
+		return a.handleClearCommand(ctx)
 	case "/status":
-		return []string{a.renderStatus()}
+		return []string{a.renderStatus(ctx)}
+	case "/model":
+		return a.handleModelCommand(ctx, fields)
+	case "/reasoning":
+		return a.handleReasoningCommand(ctx, fields)
+	case "/plan_mode":
+		return a.handlePlanModeCommand(ctx, fields)
 	default:
-		return []string{"未知命令；支持的命令有：/list、/projects、/project_add <name> <abs-path>、/project_remove <name>、/open <project>、/close、/kill、/status"}
+		return []string{"未知命令；支持的命令有：/list、/projects、/project_add <name> <abs-path>、/project_remove <name>、/open <project>、/close、/kill、/clear、/status、/model [model]、/reasoning [effort]、/plan_mode [default|plan]"}
 	}
+}
+
+func (a *Adapter) handleClearCommand(ctx context.Context) []string {
+	active, ok := a.registry.Active()
+	if !ok {
+		return []string{"当前没有活跃会话，请先执行 /open <project>"}
+	}
+	if response := a.ensureRemoteControlAllowed(ctx, active); response != nil {
+		return response
+	}
+
+	status, err := a.runtime.ClearThread(ctx, active)
+	if err != nil {
+		return []string{fmt.Sprintf("清空当前对话失败：%v", err)}
+	}
+
+	lines := []string{
+		"已清空当前对话上下文",
+		fmt.Sprintf("新 thread: %s", status.ThreadID),
+		"下一步: 直接发送新消息即可",
+	}
+	return []string{strings.Join(lines, "\n")}
 }
 
 func (a *Adapter) renderList() string {
@@ -472,27 +508,250 @@ func (a *Adapter) renderProjects() string {
 	return strings.Join(lines, "\n")
 }
 
-func (a *Adapter) renderStatus() string {
-	lines := make([]string, 0, 4)
+func (a *Adapter) handleModelCommand(ctx context.Context, fields []string) []string {
+	active, ok := a.registry.Active()
+	if !ok {
+		return []string{"当前没有活跃会话，请先执行 /open <project>"}
+	}
 
-	if active, ok := a.registry.Active(); ok {
-		lines = append(lines, fmt.Sprintf("当前会话: %s [%s]", active.Name, active.State))
+	if len(fields) == 1 {
+		status, err := a.runtime.Status(ctx, active)
+		if err != nil {
+			return []string{fmt.Sprintf("读取会话状态失败：%v", err)}
+		}
+		models, err := a.runtime.ListModels(ctx, active)
+		if err != nil {
+			return []string{fmt.Sprintf("读取模型列表失败：%v", err)}
+		}
+		return []string{a.renderModelStatus(status, models)}
+	}
+	if len(fields) != 2 {
+		return []string{"用法：/model [model]"}
+	}
+	if response := a.ensureRemoteControlAllowed(ctx, active); response != nil {
+		return response
+	}
+	status, note, err := a.runtime.SetModel(ctx, active, fields[1])
+	if err != nil {
+		return []string{fmt.Sprintf("设置模型失败：%v", err)}
+	}
+	lines := []string{
+		fmt.Sprintf("已设置待生效模型：%s", effectiveOrPending(status.Pending.Model, status.Effective.Model)),
+		"将在下一条消息时生效",
+	}
+	if strings.TrimSpace(note) != "" {
+		lines = append(lines, note)
+	}
+	return []string{strings.Join(lines, "\n")}
+}
+
+func (a *Adapter) handleReasoningCommand(ctx context.Context, fields []string) []string {
+	active, ok := a.registry.Active()
+	if !ok {
+		return []string{"当前没有活跃会话，请先执行 /open <project>"}
+	}
+
+	if len(fields) == 1 {
+		status, err := a.runtime.Status(ctx, active)
+		if err != nil {
+			return []string{fmt.Sprintf("读取会话状态失败：%v", err)}
+		}
+		models, err := a.runtime.ListModels(ctx, active)
+		if err != nil {
+			return []string{fmt.Sprintf("读取模型列表失败：%v", err)}
+		}
+		return []string{a.renderReasoningStatus(status, models)}
+	}
+	if len(fields) != 2 {
+		return []string{"用法：/reasoning [effort]"}
+	}
+	if response := a.ensureRemoteControlAllowed(ctx, active); response != nil {
+		return response
+	}
+	status, err := a.runtime.SetReasoning(ctx, active, fields[1])
+	if err != nil {
+		return []string{fmt.Sprintf("设置 reasoning 失败：%v", err)}
+	}
+	return []string{strings.Join([]string{
+		fmt.Sprintf("已设置待生效 reasoning：%s", effectiveOrPending(status.Pending.Reasoning, status.Effective.Reasoning)),
+		"将在下一条消息时生效",
+	}, "\n")}
+}
+
+func (a *Adapter) handlePlanModeCommand(ctx context.Context, fields []string) []string {
+	active, ok := a.registry.Active()
+	if !ok {
+		return []string{"当前没有活跃会话，请先执行 /open <project>"}
+	}
+
+	if len(fields) == 1 {
+		status, err := a.runtime.Status(ctx, active)
+		if err != nil {
+			return []string{fmt.Sprintf("读取会话状态失败：%v", err)}
+		}
+		return []string{a.renderPlanModeStatus(status)}
+	}
+	if len(fields) != 2 {
+		return []string{"用法：/plan_mode [default|plan]"}
+	}
+	if response := a.ensureRemoteControlAllowed(ctx, active); response != nil {
+		return response
+	}
+
+	mode := session.PlanMode(strings.TrimSpace(fields[1]))
+	if mode != session.PlanModeDefault && mode != session.PlanModePlan {
+		return []string{"用法：/plan_mode [default|plan]"}
+	}
+	status, err := a.runtime.SetPlanMode(ctx, active, mode)
+	if err != nil {
+		return []string{fmt.Sprintf("设置 plan mode 失败：%v", err)}
+	}
+	return []string{strings.Join([]string{
+		fmt.Sprintf("已设置待生效计划模式：%s", effectiveOrPending(string(status.Pending.PlanMode), string(status.Effective.PlanMode))),
+		fmt.Sprintf("待生效 reasoning：%s", effectiveOrPending(status.Pending.Reasoning, status.Effective.Reasoning)),
+		"将在下一条消息时生效",
+	}, "\n")}
+}
+
+func (a *Adapter) renderStatus(ctx context.Context) string {
+	active, ok := a.registry.Active()
+	if !ok {
+		return "当前会话: 无\n下一步: 先执行 /open <project>"
+	}
+
+	status, err := a.runtime.Status(ctx, active)
+	if err != nil {
+		return fmt.Sprintf("读取会话状态失败：%v", err)
+	}
+
+	lines := []string{
+		fmt.Sprintf("当前会话: %s [%s]", status.View.Name, status.View.State),
+		fmt.Sprintf("模型: %s", status.Effective.Model),
+		fmt.Sprintf("Reasoning: %s", status.Effective.Reasoning),
+		fmt.Sprintf("计划模式: %s", status.Effective.PlanMode),
+	}
+	if status.Pending.Model != "" {
+		lines = append(lines, fmt.Sprintf("待生效模型: %s", status.Pending.Model))
+	}
+	if status.Pending.Reasoning != "" {
+		lines = append(lines, fmt.Sprintf("待生效 Reasoning: %s", status.Pending.Reasoning))
+	}
+	if status.Pending.PlanMode != "" {
+		lines = append(lines, fmt.Sprintf("待生效计划模式: %s", status.Pending.PlanMode))
+	}
+	if strings.TrimSpace(status.Cwd) != "" {
+		lines = append(lines, fmt.Sprintf("工作目录: %s", status.Cwd))
+	}
+	if strings.TrimSpace(status.Branch) != "" {
+		lines = append(lines, fmt.Sprintf("分支: %s", status.Branch))
+	}
+	if strings.TrimSpace(status.CodexVersion) != "" {
+		lines = append(lines, fmt.Sprintf("Codex CLI: %s", status.CodexVersion))
+	}
+	if strings.TrimSpace(status.ThreadID) != "" {
+		lines = append(lines, fmt.Sprintf("Thread ID: %s", status.ThreadID))
+	}
+	if status.LocalWritableAttach {
+		lines = append(lines, "桌面占用: 有可写 attach")
 	} else {
-		lines = append(lines, "当前会话: 无")
+		lines = append(lines, "桌面占用: 无")
 	}
-
-	sessions := a.registry.List()
-	if len(sessions) == 0 {
-		lines = append(lines, "会话列表: 无")
-		return strings.Join(lines, "\n")
+	if status.HasTokenUsage && status.TokenUsage.ContextWindow > 0 {
+		lines = append(lines,
+			fmt.Sprintf("Context 剩余: %d%%", contextPercentLeft(status.TokenUsage)),
+			fmt.Sprintf("窗口大小: %s", humanTokenCount(status.TokenUsage.ContextWindow)),
+			fmt.Sprintf("已用 Tokens: %s", humanTokenCount(status.TokenUsage.TotalTokens)),
+		)
 	}
-
-	lines = append(lines, "会话列表：")
-	for _, view := range sessions {
-		lines = append(lines, fmt.Sprintf("- %s [%s]", view.Name, view.State))
-	}
-
 	return strings.Join(lines, "\n")
+}
+
+func (a *Adapter) renderModelStatus(status session.Status, models []appserver.ModelInfo) string {
+	lines := []string{
+		fmt.Sprintf("当前模型: %s", status.Effective.Model),
+	}
+	if status.Pending.Model != "" {
+		lines = append(lines, fmt.Sprintf("待生效模型: %s", status.Pending.Model))
+	}
+	lines = append(lines, "可用模型：")
+	for _, model := range models {
+		lines = append(lines, fmt.Sprintf("- %s [默认 reasoning: %s; 支持: %s]", model.Model, model.DefaultReasoning, strings.Join(model.Supported, ", ")))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (a *Adapter) renderReasoningStatus(status session.Status, models []appserver.ModelInfo) string {
+	targetModel := effectiveOrPending(status.Pending.Model, status.Effective.Model)
+	lines := []string{
+		fmt.Sprintf("当前 reasoning: %s", status.Effective.Reasoning),
+		fmt.Sprintf("目标模型: %s", targetModel),
+	}
+	if status.Pending.Reasoning != "" {
+		lines = append(lines, fmt.Sprintf("待生效 reasoning: %s", status.Pending.Reasoning))
+	}
+	if model, ok := findModelInfo(models, targetModel); ok {
+		lines = append(lines, fmt.Sprintf("支持的 reasoning: %s", strings.Join(model.Supported, ", ")))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (a *Adapter) renderPlanModeStatus(status session.Status) string {
+	lines := []string{
+		fmt.Sprintf("当前计划模式: %s", status.Effective.PlanMode),
+	}
+	if status.Pending.PlanMode != "" {
+		lines = append(lines, fmt.Sprintf("待生效计划模式: %s", status.Pending.PlanMode))
+	}
+	return strings.Join(lines, "\n")
+}
+
+func (a *Adapter) ensureRemoteControlAllowed(ctx context.Context, active session.View) []string {
+	attached, err := a.runtime.IsLocallyAttached(ctx, active.Name)
+	if err != nil {
+		return []string{fmt.Sprintf("检查会话占用失败：%v", err)}
+	}
+	if attached {
+		return []string{"当前会话在桌面端本地占用中，请先 detach 后再继续远程操作"}
+	}
+	return nil
+}
+
+func findModelInfo(models []appserver.ModelInfo, target string) (appserver.ModelInfo, bool) {
+	for _, model := range models {
+		if model.Model == target || model.ID == target {
+			return model, true
+		}
+	}
+	return appserver.ModelInfo{}, false
+}
+
+func effectiveOrPending(pending string, effective string) string {
+	if strings.TrimSpace(pending) != "" {
+		return strings.TrimSpace(pending)
+	}
+	return strings.TrimSpace(effective)
+}
+
+func contextPercentLeft(tokens session.TokenUsage) int64 {
+	if tokens.ContextWindow <= 0 {
+		return 0
+	}
+	remaining := tokens.ContextWindow - tokens.TotalTokens
+	if remaining < 0 {
+		remaining = 0
+	}
+	return (remaining * 100) / tokens.ContextWindow
+}
+
+func humanTokenCount(value int64) string {
+	switch {
+	case value >= 1_000_000:
+		return fmt.Sprintf("%dM", value/1_000_000)
+	case value >= 1_000:
+		return fmt.Sprintf("%dK", value/1_000)
+	default:
+		return fmt.Sprintf("%d", value)
+	}
 }
 
 type chatIDContextKey struct{}

@@ -41,7 +41,7 @@
 
 - 项目名对应的 session 命名固定为 `codex-{project}`。
 - 会话状态至少支持：`idle`、`starting`、`running`、`detached`、`exited`、`lost`。
-- 对外 bot 命令面只保留：`/list`、`/projects`、`/project_add <name> <abs-path>`、`/project_remove <name>`、`/open <project>`、`/close`、`/kill`、`/status`。
+- 对外 bot 命令面只保留：`/list`、`/projects`、`/project_add <name> <abs-path>`、`/project_remove <name>`、`/open <project>`、`/close`、`/kill`、`/clear`、`/status`、`/model [model]`、`/reasoning [effort]`、`/plan_mode [default|plan]`。
 - `/restart` 不是 MVP bot 命令；如需恢复增强，只能先作为后续占位写在文档中。
 - Bridge 重启后必须优先尝试接管已有 `tmux session`，而不是默认重启 Codex。
 - 任何状态提示都要告诉用户当前状态和下一步动作，不允许只报技术错误。

@@ -176,6 +176,16 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 5. App-server 事件流返回 `final_answer` 或审批请求。
 6. Output formatter 分片、节流后发回 Telegram。
 
+### 5.2.3 `/model`、`/reasoning`、`/plan_mode`
+
+1. Telegram webhook adapter 校验当前存在 active session。
+2. 读取当前 session 的 bridge 控制状态与 app-server 线程状态。
+3. `/model` 通过 `model/list` 校验目标模型，并同步计算 reasoning 兼容性。
+4. `/reasoning` 按当前目标模型支持列表校验目标 effort。
+5. `/plan_mode` 在 bridge 内部映射成 `default` 或 `plan` 预设，不直接透传成 app-server 原生命令。
+6. 命令只更新当前 session 的 pending 控制状态，不会伪造空 turn。
+7. 下一条真实用户输入进入 `turn/start` 时，pending model / effort 一并覆盖到底层会话，并提升为 effective 状态。
+
 ### 5.2.1 图片消息
 
 1. Telegram webhook adapter 识别 `photo` 或图片型 `document`。
@@ -231,14 +241,29 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 4. Session registry 删除该 session 记录。
 5. 给用户返回明确结果和恢复动作。
 
-### 5.5 `/status`
+### 5.5 `/clear`
+
+1. 只作用于当前 active session。
+2. bridge 不重建 `tmux session`，也不重启 `codex app-server`。
+3. bridge 立即向 app-server 创建一个新的 thread，并把新的 `thread id` 写回 tmux metadata。
+4. 保留当前 effective model、reasoning、plan mode。
+5. 保留当前 pending model、reasoning、plan mode，让它们继续等待下一条真实用户输入生效。
+6. 清空当前 pending approval 和最近 token usage snapshot。
+7. `/status` 之后应直接看到新的 `thread id`；窗口统计在收到新 thread 的 token usage 事件前可以为空。
+
+### 5.6 `/status`
 
 返回至少包括：
 
 - 当前 active session
-- 已知 session 列表及状态
+- 当前 effective model / reasoning / plan mode
+- 当前 pending model / reasoning / plan mode（仅在与 effective 不同时显示）
 - 是否检测到 tmux 存活
 - 是否存在本地 attach 占用
+- 当前 cwd 与 git branch
+- 当前 Codex CLI version
+- 当前 thread id
+- 当前 Context left / Window / Used tokens（基于 app-server 最近一次 token usage 通知）
 - 若状态异常，下一步建议动作
 
 ### 5.6 `/projects`
@@ -283,7 +308,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 
 成功判据：
 
-- `/status` 可见该 session 为 `running` 或至少已脱离 `starting`。
+- `/status` 可见当前 active session 已进入 `running` 或至少已脱离 `starting`。
 - 后续 plain text 可以进入 Codex。
 
 ### 6.2 重连 tmux
@@ -300,7 +325,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 
 成功判据：
 
-- 原有 session 可在 `/status` 中重新出现。
+- 原有 session 可在 `/list` 中重新出现。
 - 用户重新 `/open <project>` 时优先绑定已有 session，而不是新建。
 
 ### 6.3 检测 Codex 存活

@@ -6,6 +6,7 @@ mini_app_base_url = "https://imtty.example.com"
 project_store_path = ".imtty-projects.json"
 tmux_prefix = "codex-"
 codex_bin = "codex"
+plan_mode_reasoning_effort = "xhigh"
 message_chunk_bytes = 3500
 flush_interval_ms = 500
 

@@ -74,9 +74,13 @@ Key design choices:
 - `/open <project>` creates or binds `codex-{project}`
 - `/close` detaches the current active session
 - `/kill` terminates the underlying session and removes it from the known session list
-- `/status` shows the current active session and known sessions
+- `/clear` starts a fresh thread for the current active session without recreating the tmux session
+- `/status` shows the current active session details and current Codex window stats
 - `/list` lists sessions only
 - `/projects` lists allowed projects only
+- `/model [model-id]` shows or updates the active session model override
+- `/reasoning [effort]` shows or updates the active session reasoning override
+- `/plan_mode [default|plan]` shows or updates the active session bridge-side plan preset
 
 ### Project Whitelist
 
@@ -92,6 +96,8 @@ Key design choices:
 - Telegram shows native `typing` while Codex is working
 - only final answers, approval prompts, and essential status are sent back
 - terminal noise is suppressed by default
+- model / reasoning / plan-mode changes are queued on the active session and applied with the next real turn
+- `/clear` immediately switches the active session to a new empty thread while keeping the tmux session and effective controls
 - writable local desktop attach blocks remote writes and remote kill
 - readonly spectator mode is supported with `tmux attach -r -t codex-<project>`
 
@@ -343,7 +349,11 @@ Important:
 - `/open <project>`
 - `/close`
 - `/kill`
+- `/clear`
 - `/status`
+- `/model [model-id]`
+- `/reasoning [effort]`
+- `/plan_mode [default|plan]`
 
 ### HTTP Endpoints
 
