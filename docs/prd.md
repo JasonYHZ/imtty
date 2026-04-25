@@ -163,6 +163,7 @@ MVP 不定义：
 - Telegram 默认只发送最终 assistant 回复、审批提示和必要状态，不镜像原始终端过程流。
 - 当 bridge 已成功把 turn 提交给 Codex 后，Telegram 可显示原生 `typing` 状态，直到最终回复或审批提示返回。
 - commentary、工具调用轨迹、terminal 输出、prompt、状态栏、内部推理和类似 TUI 过程噪音默认不得发到 Telegram。
+- Codex 内部维护任务的最终报告不得发到 Telegram，例如 memory 更新报告。
 - 普通文本成功注入当前 active session 后默认不发送确认回执，避免和短最终回复形成视觉重复。
 - `/status` 追求 app-server 协议支持下的最佳努力，不承诺与 Codex TUI 状态行逐字段完全一致。
 - 出错时要保留最小可读上下文，不能只发“发送失败”。

@@ -140,6 +140,48 @@ func TestClientEmitsFinalAnswerOnly(t *testing.T) {
 	}
 }
 
+func TestClientSuppressesMemoryMaintenanceFinalAnswer(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+	server.onRequest("thread/start", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{
+			"thread": map[string]any{"id": "thread-123"},
+		})
+	})
+	server.onRequest("turn/start", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{
+			"turn": map[string]any{"id": "turn-1"},
+		})
+		server.notify(conn, "item/completed", map[string]any{
+			"item": map[string]any{
+				"type": "agentMessage",
+				"text": "Updated [MEMORY.md](/Users/jasonyu/.codex/memories/MEMORY.md:4435) and " +
+					"[memory_summary.md](/Users/jasonyu/.codex/memories/memory_summary.md:344) incrementally for the one new thread `019dbf38-d9d3-7fa1-9c70-55666ae6674c`.",
+				"phase": "final_answer",
+			},
+		})
+	})
+
+	client := NewClient(server.wsURL(), "/tmp/project-a")
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer client.Close()
+
+	if _, err := client.EnsureThread(context.Background(), ""); err != nil {
+		t.Fatalf("EnsureThread() error = %v", err)
+	}
+	if err := client.StartTurn(context.Background(), "hi"); err != nil {
+		t.Fatalf("StartTurn() error = %v", err)
+	}
+
+	waitForNoEvent(t, client.Events())
+}
+
 func TestClientStartTurnInputsSendsLocalImageAndCaption(t *testing.T) {
 	server := newFakeAppServer(t)
 	defer server.Close()
@@ -399,6 +441,16 @@ func waitForEvent(t *testing.T, events <-chan Event) Event {
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for event")
 		return Event{}
+	}
+}
+
+func waitForNoEvent(t *testing.T, events <-chan Event) {
+	t.Helper()
+
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected event = %#v", event)
+	case <-time.After(200 * time.Millisecond):
 	}
 }
 

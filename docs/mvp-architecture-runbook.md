@@ -206,6 +206,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 
 - Telegram 默认只接收最终 assistant 回复、审批提示和必要状态。
 - commentary、工具执行轨迹、terminal 输出、prompt、状态栏、内部推理和类似 TUI 过程噪音默认不发到 Telegram。
+- Codex 内部维护任务的最终报告默认不发到 Telegram，例如 memory 更新报告。
 - 普通文本成功送入当前 active session 后默认静默，不额外回一条“已发送到 ...”。
 - 当 turn 已提交给 Codex 且仍在处理中时，bridge 会周期性发送 Telegram `typing` chat action，直到最终回复或审批提示出现。
 - 本地 attach 时，普通文本与审批回复直接拒绝，不进入远程 turn。

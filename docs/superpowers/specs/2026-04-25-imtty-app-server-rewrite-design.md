@@ -64,6 +64,7 @@ Telegram 默认不再消费：
 - reasoning
 - command output delta
 - file change delta
+- Codex 内部维护任务报告，例如 memory 更新报告
 - prompt
 - terminal status
 

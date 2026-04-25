@@ -409,6 +409,9 @@ func (c *Client) handleInboundRequestOrNotification(envelope rpcEnvelope) {
 	phase, _ := item["phase"].(string)
 	text, _ := item["text"].(string)
 	if itemType == "agentMessage" && phase == string(EventFinalAnswer) {
+		if isMemoryMaintenanceReport(text) {
+			return
+		}
 		c.events <- Event{
 			Kind: EventFinalAnswer,
 			Text: text,
@@ -423,6 +426,13 @@ func isApprovalMethod(method string) bool {
 	default:
 		return false
 	}
+}
+
+func isMemoryMaintenanceReport(text string) bool {
+	trimmed := strings.TrimSpace(text)
+	return strings.HasPrefix(trimmed, "Updated [MEMORY.md](") &&
+		strings.Contains(trimmed, ".codex/memories/MEMORY.md") &&
+		strings.Contains(trimmed, "memory_summary.md")
 }
 
 func approvalText(method string, params map[string]any) string {
