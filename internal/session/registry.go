@@ -84,6 +84,31 @@ func (r *Registry) Open(project string) (View, error) {
 	return view, nil
 }
 
+func (r *Registry) Resolve(project string) (View, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	root, ok := r.allowed[project]
+	if !ok {
+		return View{}, fmt.Errorf("unknown project %q", project)
+	}
+
+	view, exists := r.sessions[project]
+	if !exists {
+		return View{
+			Project: project,
+			Name:    "codex-" + project,
+			Root:    root,
+			State:   StateStarting,
+		}, nil
+	}
+
+	if view.State == StateDetached || view.State == StateExited || view.State == StateLost || view.State == StateIdle {
+		view.State = StateStarting
+	}
+	return view, nil
+}
+
 func (r *Registry) SetState(project string, state State) (View, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

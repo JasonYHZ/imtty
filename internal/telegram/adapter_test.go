@@ -282,6 +282,105 @@ func TestWebhookHandlerControlCommandsAndStatus(t *testing.T) {
 	}
 }
 
+func TestWebhookHandlerOpenWithThreadIDMatchesCurrentThread(t *testing.T) {
+	runtime := &fakeSessionRuntime{
+		statuses: map[string]session.Status{
+			"codex-project-a": {
+				View: session.View{
+					Name:    "codex-project-a",
+					Project: "project-a",
+					Root:    "/tmp/project-a",
+					State:   session.StateRunning,
+				},
+				ThreadID: "thread-123",
+			},
+		},
+	}
+	adapter := NewAdapter(session.NewRegistry(map[string]string{
+		"project-a": "/tmp/project-a",
+	}), runtime, &fakeProjectStore{}, nil, nil, nil)
+	handler := NewWebhookHandler("secret-token", adapter, &fakeReplySender{}, log.New(io.Discard, "", 0))
+
+	response := sendTelegramUpdate(t, handler, "secret-token", `/open project-a thread-123`)
+	if !strings.Contains(response.Responses[0], "已切换到会话 codex-project-a [running]") {
+		t.Fatalf("open response = %#v, want open success", response.Responses)
+	}
+}
+
+func TestWebhookHandlerOpenWithThreadIDMismatchKeepsPreviousActiveSession(t *testing.T) {
+	runtime := &fakeSessionRuntime{
+		statuses: map[string]session.Status{
+			"codex-project-a": {
+				View: session.View{
+					Name:    "codex-project-a",
+					Project: "project-a",
+					Root:    "/tmp/project-a",
+					State:   session.StateRunning,
+				},
+				ThreadID: "thread-123",
+			},
+			"codex-project-b": {
+				View: session.View{
+					Name:    "codex-project-b",
+					Project: "project-b",
+					Root:    "/tmp/project-b",
+					State:   session.StateRunning,
+				},
+				ThreadID: "thread-999",
+			},
+		},
+	}
+	adapter := NewAdapter(session.NewRegistry(map[string]string{
+		"project-a": "/tmp/project-a",
+		"project-b": "/tmp/project-b",
+	}), runtime, &fakeProjectStore{}, nil, nil, nil)
+	handler := NewWebhookHandler("secret-token", adapter, &fakeReplySender{}, log.New(io.Discard, "", 0))
+
+	sendTelegramUpdate(t, handler, "secret-token", `/open project-b`)
+	response := sendTelegramUpdate(t, handler, "secret-token", `/open project-a wrong-thread`)
+	if !strings.Contains(response.Responses[0], "thread id 不匹配") || !strings.Contains(response.Responses[0], "thread-123") {
+		t.Fatalf("mismatch response = %#v, want mismatch guidance with actual thread", response.Responses)
+	}
+
+	statusResponse := sendTelegramUpdate(t, handler, "secret-token", `/status`)
+	if !strings.Contains(statusResponse.Responses[0], "当前会话: codex-project-b") {
+		t.Fatalf("status response = %#v, want previous active session preserved", statusResponse.Responses)
+	}
+}
+
+func TestWebhookHandlerCloseAndKillReturnThreadID(t *testing.T) {
+	runtime := &fakeSessionRuntime{
+		statuses: map[string]session.Status{
+			"codex-project-a": {
+				View: session.View{
+					Name:    "codex-project-a",
+					Project: "project-a",
+					Root:    "/tmp/project-a",
+					State:   session.StateRunning,
+				},
+				ThreadID: "thread-123",
+			},
+		},
+	}
+	adapter := NewAdapter(session.NewRegistry(map[string]string{
+		"project-a": "/tmp/project-a",
+	}), runtime, &fakeProjectStore{}, nil, nil, nil)
+	handler := NewWebhookHandler("secret-token", adapter, &fakeReplySender{}, log.New(io.Discard, "", 0))
+
+	sendTelegramUpdate(t, handler, "secret-token", `/open project-a`)
+
+	closeResponse := sendTelegramUpdate(t, handler, "secret-token", `/close`)
+	if !strings.Contains(closeResponse.Responses[0], "thread-123") || !strings.Contains(closeResponse.Responses[0], "已关闭当前会话") {
+		t.Fatalf("close response = %#v, want thread id in close response", closeResponse.Responses)
+	}
+
+	sendTelegramUpdate(t, handler, "secret-token", `/open project-a`)
+	killResponse := sendTelegramUpdate(t, handler, "secret-token", `/kill`)
+	if !strings.Contains(killResponse.Responses[0], "thread-123") || !strings.Contains(killResponse.Responses[0], "已彻底删除会话") {
+		t.Fatalf("kill response = %#v, want thread id in kill response", killResponse.Responses)
+	}
+}
+
 func TestWebhookHandlerClearResetsThreadForActiveSession(t *testing.T) {
 	runtime := &fakeSessionRuntime{
 		statuses: map[string]session.Status{

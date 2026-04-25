@@ -153,14 +153,22 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 7. Session registry 更新状态为 `starting` 再转 `running`。
 8. active session 切换到该 project。
 
-### 5.1.1 `/project_add <name> <abs-path>`
+### 5.1.1 `/open <project> <thread-id>`
+
+1. bridge 先定位目标 project 对应的 `codex-{project}` session。
+2. bridge 读取该 session 当前真实 thread id。
+3. 只有当当前真实 thread id 与给定 thread id 完全一致时，才允许绑定该 session。
+4. 如果 thread id 不匹配，必须回显当前真实 thread id 和下一步动作。
+5. thread id 校验失败时，不允许破坏当前已有 active session 绑定。
+
+### 5.1.2 `/project_add <name> <abs-path>`
 
 1. Telegram webhook adapter 解析命令，并校验路径必须为绝对路径。
 2. Session registry 将该项目加入允许列表。
 3. dynamic project store 将该项目写入本地持久化文件。
 4. `/projects` 立即可见该项目，后续 `/open <project>` 可以使用。
 
-### 5.1.2 `/project_remove <name>`
+### 5.1.3 `/project_remove <name>`
 
 1. Telegram webhook adapter 校验该项目是否属于动态白名单。
 2. 若该项目存在会话记录，则先停止对应 pump 并终止底层 tmux session。
@@ -232,6 +240,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 1. 解除当前 IM 会话与 active session 的绑定。
 2. session 状态转为 `detached` 或保留其当前运行态的可见标记。
 3. 不杀掉底层 tmux/Codex。
+4. 响应中回显当前会话名和当前 thread id。
 
 ### 5.4 `/kill`
 
@@ -240,6 +249,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 3. 否则终止底层 tmux session 或其内部 Codex app-server 进程。
 4. Session registry 删除该 session 记录。
 5. 给用户返回明确结果和恢复动作。
+6. 响应中回显当前会话名和当前 thread id。
 
 ### 5.5 `/clear`
 

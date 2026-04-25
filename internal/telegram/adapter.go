@@ -325,27 +325,66 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 	case "/project_remove":
 		return a.handleProjectRemove(ctx, fields)
 	case "/open":
-		if len(fields) != 2 {
-			return []string{"用法：/open <project>"}
+		if len(fields) != 2 && len(fields) != 3 {
+			return []string{"用法：/open <project> [thread-id]"}
 		}
 
-		if previous, ok := a.registry.Active(); ok && previous.Project != fields[1] {
-			a.runtime.CloseSession(previous.Name)
+		project := fields[1]
+		expectedThreadID := ""
+		if len(fields) == 3 {
+			expectedThreadID = strings.TrimSpace(fields[2])
 		}
 
-		view, err := a.registry.Open(fields[1])
+		if current, ok := a.registry.Active(); ok && current.Project == project {
+			status, err := a.runtime.Status(ctx, current)
+			if err == nil {
+				if expectedThreadID != "" && status.ThreadID != expectedThreadID {
+					return []string{strings.Join([]string{
+						"打开项目失败：thread id 不匹配",
+						fmt.Sprintf("当前 thread: %s", status.ThreadID),
+						fmt.Sprintf("下一步: 使用 /open %s %s", project, status.ThreadID),
+					}, "\n")}
+				}
+				return []string{fmt.Sprintf("已切换到会话 %s [%s]", current.Name, current.State)}
+			}
+		}
+
+		preview, err := a.registry.Resolve(project)
 		if err != nil {
 			return []string{fmt.Sprintf("打开项目失败：%v", err)}
 		}
 
-		if err := a.runtime.OpenSession(ctx, chatIDFromContext(ctx), view); err != nil {
-			_, _ = a.registry.SetState(view.Project, session.StateLost)
-			_ = a.registry.CloseActive()
+		if err := a.runtime.OpenSession(ctx, chatIDFromContext(ctx), preview); err != nil {
+			return []string{fmt.Sprintf("打开项目失败：%v", err)}
+		}
+
+		status, err := a.runtime.Status(ctx, preview)
+		if err != nil {
+			a.runtime.CloseSession(preview.Name)
+			return []string{fmt.Sprintf("打开项目失败：%v", err)}
+		}
+		if expectedThreadID != "" && status.ThreadID != expectedThreadID {
+			a.runtime.CloseSession(preview.Name)
+			return []string{strings.Join([]string{
+				"打开项目失败：thread id 不匹配",
+				fmt.Sprintf("当前 thread: %s", status.ThreadID),
+				fmt.Sprintf("下一步: 使用 /open %s %s", project, status.ThreadID),
+			}, "\n")}
+		}
+
+		if previous, ok := a.registry.Active(); ok && previous.Project != project {
+			a.runtime.CloseSession(previous.Name)
+		}
+
+		view, err := a.registry.Open(project)
+		if err != nil {
+			a.runtime.CloseSession(preview.Name)
 			return []string{fmt.Sprintf("打开项目失败：%v", err)}
 		}
 
 		view, err = a.registry.SetState(view.Project, session.StateRunning)
 		if err != nil {
+			a.runtime.CloseSession(preview.Name)
 			return []string{fmt.Sprintf("打开项目失败：%v", err)}
 		}
 
@@ -356,13 +395,18 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 			return []string{"当前没有可关闭的活跃会话"}
 		}
 
+		status, statusErr := a.runtime.Status(ctx, active)
 		a.runtime.CloseSession(active.Name)
 
 		if err := a.registry.CloseActive(); err != nil {
 			return []string{fmt.Sprintf("关闭会话失败：%v", err)}
 		}
 
-		return []string{fmt.Sprintf("已关闭当前会话 %s", active.Name)}
+		lines := []string{fmt.Sprintf("已关闭当前会话 %s", active.Name)}
+		if statusErr == nil && strings.TrimSpace(status.ThreadID) != "" {
+			lines = append([]string{fmt.Sprintf("当前 thread: %s", status.ThreadID)}, lines...)
+		}
+		return []string{strings.Join(lines, "\n")}
 	case "/kill":
 		active, ok := a.registry.Active()
 		if !ok {
@@ -377,6 +421,7 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 			return []string{"当前会话在桌面端本地占用中，请先 detach 后再继续远程操作"}
 		}
 
+		status, statusErr := a.runtime.Status(ctx, active)
 		a.runtime.CloseSession(active.Name)
 		if err := a.runtime.KillSession(ctx, active); err != nil {
 			return []string{fmt.Sprintf("终止会话失败：%v", err)}
@@ -387,7 +432,11 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 			return []string{fmt.Sprintf("终止会话失败：%v", err)}
 		}
 
-		return []string{fmt.Sprintf("已彻底删除会话 %s", view.Name)}
+		lines := []string{fmt.Sprintf("已彻底删除会话 %s", view.Name)}
+		if statusErr == nil && strings.TrimSpace(status.ThreadID) != "" {
+			lines = append([]string{fmt.Sprintf("当前 thread: %s", status.ThreadID)}, lines...)
+		}
+		return []string{strings.Join(lines, "\n")}
 	case "/clear":
 		return a.handleClearCommand(ctx)
 	case "/status":
@@ -399,7 +448,7 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 	case "/plan_mode":
 		return a.handlePlanModeCommand(ctx, fields)
 	default:
-		return []string{"未知命令；支持的命令有：/list、/projects、/project_add <name> <abs-path>、/project_remove <name>、/open <project>、/close、/kill、/clear、/status、/model [model]、/reasoning [effort]、/plan_mode [default|plan]"}
+		return []string{"未知命令；支持的命令有：/list、/projects、/project_add <name> <abs-path>、/project_remove <name>、/open <project> [thread-id]、/close、/kill、/clear、/status、/model [model]、/reasoning [effort]、/plan_mode [default|plan]"}
 	}
 }
 

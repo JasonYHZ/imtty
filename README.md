@@ -72,8 +72,11 @@ Key design choices:
 ### Sessions
 
 - `/open <project>` creates or binds `codex-{project}`
+- `/open <project> <thread-id>` binds only if the current thread of that project matches the given thread id
 - `/close` detaches the current active session
 - `/kill` terminates the underlying session and removes it from the known session list
+- `/close` returns the current thread id before detaching
+- `/kill` returns the current thread id before deleting the session
 - `/clear` starts a fresh thread for the current active session without recreating the tmux session
 - `/status` shows the current active session details and current Codex window stats
 - `/list` lists sessions only
@@ -347,6 +350,7 @@ Important:
 - `/project_add <name> <abs-path>`
 - `/project_remove <name>`
 - `/open <project>`
+- `/open <project> <thread-id>`
 - `/close`
 - `/kill`
 - `/clear`

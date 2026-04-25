@@ -85,6 +85,7 @@ MVP 只定义以下 bot 命令：
 - `/project_add <name> <abs-path>`: 动态添加一个可打开项目，并写入本地持久化白名单。
 - `/project_remove <name>`: 删除一个通过聊天窗口动态加入的项目。
 - `/open <project>`: 创建或绑定该项目的 session，并将其设为 active。
+- `/open <project> <thread-id>`: 只在该项目当前 thread 与给定 thread id 精确匹配时才绑定该 session。
 - `/close`: 关闭当前 IM 绑定，不销毁底层 session。
 - `/kill`: 杀掉当前 active session 对应的 tmux/Codex 会话，并从已知会话列表中移除。
 - `/clear`: 立即清空当前 active session 的对话 thread，并切换到新的 thread id。
@@ -120,6 +121,7 @@ MVP 不定义：
 - 单用户下可并存多个 project session。
 - 任一时刻只有一个 active session 绑定到当前 IM 会话。
 - `/open` 会切换 active session。
+- `/open <project> <thread-id>` 失败时不应破坏当前已有 active session 绑定。
 - `/close` 只解除绑定，不销毁后台 session。
 - `/kill` 会删除该 project 的现有 session 记录；后续需要重新 `/open` 才会重新创建。
 - `/clear` 只重置当前 active session 的 thread，不重建 tmux session，也不切换 active 绑定。
@@ -199,7 +201,7 @@ MVP 必须包含：
 - Telegram Mini App companion UI
 - 项目白名单与 `/projects`
 - `/project_add`、`/project_remove`
-- `/open`、`/close`、`/kill`、`/status`
+- `/open`、`/close`、`/kill`、`/clear`、`/status`
 - `tmux` session 创建、绑定、探测、销毁
 - 普通文本透传
 - 单张图片输入透传
