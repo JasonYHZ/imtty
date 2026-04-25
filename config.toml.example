@@ -1,0 +1,17 @@
+listen = ":8080"
+telegram_bot_token = "replace-with-bot-token"
+telegram_webhook_secret = "replace-with-webhook-secret"
+telegram_owner_id = 123456789
+mini_app_base_url = "https://imtty.example.com"
+project_store_path = ".imtty-projects.json"
+tmux_prefix = "codex-"
+codex_bin = "codex"
+message_chunk_bytes = 3500
+flush_interval_ms = 500
+
+[projects]
+demo = "/absolute/path/to/your/project"
+
+[project_browse_roots]
+workspace = "/absolute/path/to/your/workspace"
+playground = "/absolute/path/to/another/root"

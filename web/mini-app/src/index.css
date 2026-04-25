@@ -1,0 +1,27 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f5efe4;
+  --foreground: #201a16;
+  --card: #fffaf2;
+  --card-foreground: #201a16;
+  --border: #dccfbc;
+  --primary: #9c4a1a;
+  --primary-foreground: #fff7ef;
+  --muted: #ece2d3;
+  --muted-foreground: #6f6254;
+  --destructive: #a12f1a;
+  --destructive-foreground: #fff8f6;
+  font-family: "Avenir Next", "PingFang SC", "Segoe UI", sans-serif;
+}
+
+body {
+  background: radial-gradient(circle at top left, #fff9ef, var(--background) 45%, #efe3d1 100%);
+  color: var(--foreground);
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
