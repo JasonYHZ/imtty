@@ -80,6 +80,18 @@ func NewRuntime(host SessionHost, formatter stream.Formatter, sender Sender, cod
 }
 
 func (r *Runtime) OpenSession(ctx context.Context, chatID int64, view session.View) error {
+	return r.openSession(ctx, chatID, view, "", false)
+}
+
+func (r *Runtime) OpenSessionWithThreadID(ctx context.Context, chatID int64, view session.View, threadID string) error {
+	threadID = strings.TrimSpace(threadID)
+	if threadID == "" {
+		return errors.New("thread id is required")
+	}
+	return r.openSession(ctx, chatID, view, threadID, true)
+}
+
+func (r *Runtime) openSession(ctx context.Context, chatID int64, view session.View, requestedThreadID string, strictResume bool) error {
 	if err := r.host.EnsureSession(ctx, view.Name, view.Root); err != nil {
 		return err
 	}
@@ -94,13 +106,24 @@ func (r *Runtime) OpenSession(ctx context.Context, chatID int64, view session.Vi
 		return err
 	}
 
-	threadState, err := client.EnsureThread(ctx, meta.ThreadID)
-	if err != nil && strings.TrimSpace(meta.ThreadID) != "" {
+	resumeThreadID := strings.TrimSpace(meta.ThreadID)
+	if strictResume {
+		resumeThreadID = requestedThreadID
+	}
+	threadState, err := client.EnsureThread(ctx, resumeThreadID)
+	if err != nil && !strictResume && strings.TrimSpace(meta.ThreadID) != "" {
 		threadState, err = client.EnsureThread(ctx, "")
 	}
 	if err != nil {
 		_ = client.Close()
+		if strictResume {
+			return fmt.Errorf("resume thread %s failed: %w", requestedThreadID, err)
+		}
 		return err
+	}
+	if strictResume && threadState.ThreadID != requestedThreadID {
+		_ = client.Close()
+		return fmt.Errorf("resume thread %s returned thread %s", requestedThreadID, threadState.ThreadID)
 	}
 
 	if threadState.ThreadID != meta.ThreadID {

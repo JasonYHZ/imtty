@@ -326,6 +326,100 @@ func TestRuntimeClearThreadStartsFreshThreadAndResetsSnapshot(t *testing.T) {
 	}
 }
 
+func TestRuntimeOpenSessionWithThreadIDStrictlyResumesRequestedThread(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+	server.onRequest("thread/resume", func(conn *websocket.Conn, request rpcRequest) {
+		if request.Params["threadId"] != "thread-456" {
+			t.Fatalf("thread/resume threadId = %#v, want thread-456", request.Params["threadId"])
+		}
+		server.reply(conn, request.ID, map[string]any{
+			"thread":          map[string]any{"id": "thread-456"},
+			"cwd":             "/tmp/project-a",
+			"model":           "gpt-5.5",
+			"reasoningEffort": "high",
+		})
+	})
+	server.onRequest("thread/start", func(conn *websocket.Conn, request rpcRequest) {
+		t.Fatalf("thread/start must not be called for explicit resume")
+	})
+	server.onRequest("model/list", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"data": []map[string]any{}})
+	})
+
+	wsURL, err := url.Parse(server.wsURL())
+	if err != nil {
+		t.Fatalf("url.Parse() error = %v", err)
+	}
+	port, err := strconv.Atoi(wsURL.Port())
+	if err != nil {
+		t.Fatalf("Atoi(port) error = %v", err)
+	}
+
+	host := &fakeSessionHost{meta: tmux.SessionRuntimeInfo{Port: port, ThreadID: "thread-123"}}
+	runtime := NewRuntime(host, stream.NewFormatter(3500), &fakeRuntimeSender{}, "codex", "xhigh")
+	view := session.View{Name: "codex-project-a", Project: "project-a", Root: "/tmp/project-a", State: session.StateRunning}
+
+	if err := runtime.OpenSessionWithThreadID(context.Background(), 42, view, "thread-456"); err != nil {
+		t.Fatalf("OpenSessionWithThreadID() error = %v", err)
+	}
+	defer runtime.CloseSession(view.Name)
+
+	status, err := runtime.Status(context.Background(), view)
+	if err != nil {
+		t.Fatalf("Status() error = %v", err)
+	}
+	if status.ThreadID != "thread-456" {
+		t.Fatalf("ThreadID = %q, want thread-456", status.ThreadID)
+	}
+	if len(host.threadIDs) == 0 || host.threadIDs[len(host.threadIDs)-1] != "thread-456" {
+		t.Fatalf("threadIDs = %#v, want thread-456 persisted", host.threadIDs)
+	}
+}
+
+func TestRuntimeOpenSessionWithThreadIDDoesNotFallbackToStart(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+	server.onRequest("thread/resume", func(conn *websocket.Conn, request rpcRequest) {
+		server.replyError(conn, request.ID, -32000, "thread not found")
+	})
+	server.onRequest("thread/start", func(conn *websocket.Conn, request rpcRequest) {
+		t.Fatalf("thread/start must not be called when explicit resume fails")
+	})
+
+	wsURL, err := url.Parse(server.wsURL())
+	if err != nil {
+		t.Fatalf("url.Parse() error = %v", err)
+	}
+	port, err := strconv.Atoi(wsURL.Port())
+	if err != nil {
+		t.Fatalf("Atoi(port) error = %v", err)
+	}
+
+	host := &fakeSessionHost{meta: tmux.SessionRuntimeInfo{Port: port, ThreadID: "thread-123"}}
+	runtime := NewRuntime(host, stream.NewFormatter(3500), &fakeRuntimeSender{}, "codex", "xhigh")
+	view := session.View{Name: "codex-project-a", Project: "project-a", Root: "/tmp/project-a", State: session.StateRunning}
+
+	err = runtime.OpenSessionWithThreadID(context.Background(), 42, view, "missing-thread")
+	if err == nil {
+		t.Fatal("OpenSessionWithThreadID() error = nil, want resume failure")
+	}
+	if len(host.threadIDs) != 0 {
+		t.Fatalf("threadIDs = %#v, want no metadata rewrite", host.threadIDs)
+	}
+	if _, statusErr := runtime.Status(context.Background(), view); statusErr == nil {
+		t.Fatal("Status() error = nil, want no live session after failed explicit resume")
+	}
+}
+
 type fakeSessionHost struct {
 	meta           tmux.SessionRuntimeInfo
 	mu             sync.Mutex

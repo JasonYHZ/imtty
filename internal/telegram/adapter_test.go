@@ -282,43 +282,26 @@ func TestWebhookHandlerControlCommandsAndStatus(t *testing.T) {
 	}
 }
 
-func TestWebhookHandlerOpenWithThreadIDMatchesCurrentThread(t *testing.T) {
-	runtime := &fakeSessionRuntime{
-		statuses: map[string]session.Status{
-			"codex-project-a": {
-				View: session.View{
-					Name:    "codex-project-a",
-					Project: "project-a",
-					Root:    "/tmp/project-a",
-					State:   session.StateRunning,
-				},
-				ThreadID: "thread-123",
-			},
-		},
-	}
+func TestWebhookHandlerOpenWithThreadIDResumesRequestedThread(t *testing.T) {
+	runtime := &fakeSessionRuntime{}
 	adapter := NewAdapter(session.NewRegistry(map[string]string{
 		"project-a": "/tmp/project-a",
 	}), runtime, &fakeProjectStore{}, nil, nil, nil)
 	handler := NewWebhookHandler("secret-token", adapter, &fakeReplySender{}, log.New(io.Discard, "", 0))
 
-	response := sendTelegramUpdate(t, handler, "secret-token", `/open project-a thread-123`)
+	response := sendTelegramUpdate(t, handler, "secret-token", `/open project-a thread-456`)
 	if !strings.Contains(response.Responses[0], "已切换到会话 codex-project-a [running]") {
 		t.Fatalf("open response = %#v, want open success", response.Responses)
 	}
+	if len(runtime.openThreadIDs) != 1 || runtime.openThreadIDs[0] != "codex-project-a:thread-456" {
+		t.Fatalf("openThreadIDs = %#v, want explicit resume", runtime.openThreadIDs)
+	}
 }
 
-func TestWebhookHandlerOpenWithThreadIDMismatchKeepsPreviousActiveSession(t *testing.T) {
+func TestWebhookHandlerOpenWithThreadIDFailureKeepsPreviousActiveSession(t *testing.T) {
 	runtime := &fakeSessionRuntime{
+		openThreadErr: io.ErrUnexpectedEOF,
 		statuses: map[string]session.Status{
-			"codex-project-a": {
-				View: session.View{
-					Name:    "codex-project-a",
-					Project: "project-a",
-					Root:    "/tmp/project-a",
-					State:   session.StateRunning,
-				},
-				ThreadID: "thread-123",
-			},
 			"codex-project-b": {
 				View: session.View{
 					Name:    "codex-project-b",
@@ -338,8 +321,8 @@ func TestWebhookHandlerOpenWithThreadIDMismatchKeepsPreviousActiveSession(t *tes
 
 	sendTelegramUpdate(t, handler, "secret-token", `/open project-b`)
 	response := sendTelegramUpdate(t, handler, "secret-token", `/open project-a wrong-thread`)
-	if !strings.Contains(response.Responses[0], "thread id 不匹配") || !strings.Contains(response.Responses[0], "thread-123") {
-		t.Fatalf("mismatch response = %#v, want mismatch guidance with actual thread", response.Responses)
+	if !strings.Contains(response.Responses[0], "resume thread 失败") {
+		t.Fatalf("resume failure response = %#v, want resume failure guidance", response.Responses)
 	}
 
 	statusResponse := sendTelegramUpdate(t, handler, "secret-token", `/status`)
@@ -747,11 +730,13 @@ type fakeSessionRuntime struct {
 	locallyAttached map[string]bool
 	pendingApproval bool
 	openErr         error
+	openThreadErr   error
 	submitErr       error
 	approvalErr     error
 	killErr         error
 	statuses        map[string]session.Status
 	models          map[string][]appserver.ModelInfo
+	openThreadIDs   []string
 }
 
 func (f *fakeSessionRuntime) OpenSession(_ context.Context, chatID int64, view session.View) error {
@@ -759,6 +744,29 @@ func (f *fakeSessionRuntime) OpenSession(_ context.Context, chatID int64, view s
 		return f.openErr
 	}
 	f.opened = append(f.opened, formatRuntimeStart(chatID, view.Name))
+	return nil
+}
+
+func (f *fakeSessionRuntime) OpenSessionWithThreadID(_ context.Context, chatID int64, view session.View, threadID string) error {
+	if f.openThreadErr != nil {
+		return f.openThreadErr
+	}
+	f.opened = append(f.opened, formatRuntimeStart(chatID, view.Name))
+	f.openThreadIDs = append(f.openThreadIDs, view.Name+":"+threadID)
+	if f.statuses == nil {
+		f.statuses = make(map[string]session.Status)
+	}
+	f.statuses[view.Name] = session.Status{
+		View:         view,
+		Cwd:          view.Root,
+		CodexVersion: "0.125.0",
+		ThreadID:     threadID,
+		Effective: session.ControlSelection{
+			Model:     "gpt-5.5",
+			Reasoning: "high",
+			PlanMode:  session.PlanModeDefault,
+		},
+	}
 	return nil
 }
 

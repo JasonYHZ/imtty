@@ -542,6 +542,17 @@ func (f *fakeAppServer) reply(conn *websocket.Conn, id any, result any) {
 	})
 }
 
+func (f *fakeAppServer) replyError(conn *websocket.Conn, id any, code int, message string) {
+	f.write(conn, map[string]any{
+		"jsonrpc": "2.0",
+		"id":      id,
+		"error": map[string]any{
+			"code":    code,
+			"message": message,
+		},
+	})
+}
+
 func (f *fakeAppServer) notify(conn *websocket.Conn, method string, params any) {
 	f.write(conn, map[string]any{
 		"jsonrpc": "2.0",

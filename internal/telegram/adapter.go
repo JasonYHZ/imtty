@@ -25,6 +25,7 @@ type Adapter struct {
 
 type SessionRuntime interface {
 	OpenSession(ctx context.Context, chatID int64, view session.View) error
+	OpenSessionWithThreadID(ctx context.Context, chatID int64, view session.View, threadID string) error
 	CloseSession(sessionName string)
 	SubmitText(ctx context.Context, chatID int64, view session.View, text string) error
 	SubmitImage(ctx context.Context, chatID int64, view session.View, imagePath string, caption string) error
@@ -335,16 +336,8 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 			expectedThreadID = strings.TrimSpace(fields[2])
 		}
 
-		if current, ok := a.registry.Active(); ok && current.Project == project {
-			status, err := a.runtime.Status(ctx, current)
-			if err == nil {
-				if expectedThreadID != "" && status.ThreadID != expectedThreadID {
-					return []string{strings.Join([]string{
-						"打开项目失败：thread id 不匹配",
-						fmt.Sprintf("当前 thread: %s", status.ThreadID),
-						fmt.Sprintf("下一步: 使用 /open %s %s", project, status.ThreadID),
-					}, "\n")}
-				}
+		if current, ok := a.registry.Active(); ok && current.Project == project && expectedThreadID == "" {
+			if _, err := a.runtime.Status(ctx, current); err == nil {
 				return []string{fmt.Sprintf("已切换到会话 %s [%s]", current.Name, current.State)}
 			}
 		}
@@ -354,7 +347,14 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 			return []string{fmt.Sprintf("打开项目失败：%v", err)}
 		}
 
-		if err := a.runtime.OpenSession(ctx, chatIDFromContext(ctx), preview); err != nil {
+		if expectedThreadID != "" {
+			if err := a.runtime.OpenSessionWithThreadID(ctx, chatIDFromContext(ctx), preview, expectedThreadID); err != nil {
+				return []string{strings.Join([]string{
+					fmt.Sprintf("打开项目失败：resume thread 失败：%v", err),
+					fmt.Sprintf("下一步: 检查 thread id，或使用 /open %s 绑定当前会话", project),
+				}, "\n")}
+			}
+		} else if err := a.runtime.OpenSession(ctx, chatIDFromContext(ctx), preview); err != nil {
 			return []string{fmt.Sprintf("打开项目失败：%v", err)}
 		}
 
@@ -366,9 +366,9 @@ func (a *Adapter) handleCommand(ctx context.Context, text string) []string {
 		if expectedThreadID != "" && status.ThreadID != expectedThreadID {
 			a.runtime.CloseSession(preview.Name)
 			return []string{strings.Join([]string{
-				"打开项目失败：thread id 不匹配",
+				"打开项目失败：resume thread 返回了不匹配的 thread id",
 				fmt.Sprintf("当前 thread: %s", status.ThreadID),
-				fmt.Sprintf("下一步: 使用 /open %s %s", project, status.ThreadID),
+				fmt.Sprintf("下一步: 检查 thread id，或使用 /open %s 绑定当前会话", project),
 			}, "\n")}
 		}
 

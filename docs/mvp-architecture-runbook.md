@@ -156,10 +156,11 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 ### 5.1.1 `/open <project> <thread-id>`
 
 1. bridge 先定位目标 project 对应的 `codex-{project}` session。
-2. bridge 读取该 session 当前真实 thread id。
-3. 只有当当前真实 thread id 与给定 thread id 完全一致时，才允许绑定该 session。
-4. 如果 thread id 不匹配，必须回显当前真实 thread id 和下一步动作。
-5. thread id 校验失败时，不允许破坏当前已有 active session 绑定。
+2. bridge 连接该 session 内的 Codex app-server。
+3. bridge 使用给定 thread id 执行严格 `thread/resume`。
+4. 恢复成功后，bridge 将该 thread id 写回 tmux metadata，并将该 project 绑定为 active session。
+5. 恢复失败时，不允许 fallback 到 `thread/start`，不允许改写当前 thread id，也不允许破坏当前已有 active session 绑定。
+6. 失败提示必须告诉用户当前动作是 resume 失败，并给出下一步动作，例如检查 thread id 或直接 `/open <project>` 使用当前会话。
 
 ### 5.1.2 `/project_add <name> <abs-path>`
 

@@ -72,7 +72,7 @@ Key design choices:
 ### Sessions
 
 - `/open <project>` creates or binds `codex-{project}`
-- `/open <project> <thread-id>` binds only if the current thread of that project matches the given thread id
+- `/open <project> <thread-id>` strictly resumes the given Codex thread id and binds it as the project's current thread
 - `/close` detaches the current active session
 - `/kill` terminates the underlying session and removes it from the known session list
 - `/close` returns the current thread id before detaching

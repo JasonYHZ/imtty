@@ -72,7 +72,7 @@ Telegram -> imtty bridge -> tmux session -> Codex app-server
 ### 会话
 
 - `/open <project>` 创建或绑定 `codex-{project}`
-- `/open <project> <thread-id>` 只在该项目当前 thread 与给定 thread id 精确匹配时才绑定
+- `/open <project> <thread-id>` 严格恢复给定 Codex thread id，并将其绑定为该项目当前 thread
 - `/close` 解除当前 active session 绑定
 - `/kill` 终止底层会话并从已知会话列表删除
 - `/close` 会在解除绑定前回显当前 thread id

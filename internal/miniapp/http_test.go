@@ -291,6 +291,11 @@ func (f *fakeSessionRuntime) OpenSession(_ context.Context, chatID int64, view s
 	return nil
 }
 
+func (f *fakeSessionRuntime) OpenSessionWithThreadID(_ context.Context, chatID int64, view session.View, threadID string) error {
+	f.opened = append(f.opened, strconv.FormatInt(chatID, 10)+":"+view.Name+":"+threadID)
+	return nil
+}
+
 func (f *fakeSessionRuntime) CloseSession(sessionName string) {
 	f.closed = append(f.closed, sessionName)
 }
