@@ -495,20 +495,22 @@ func (r *Runtime) sendEvent(live *liveSession, event Event) {
 	r.stopTyping(live)
 	switch event.Kind {
 	case EventFinalAnswer:
-		for _, chunk := range r.formatter.Format(event.Text) {
-			if strings.TrimSpace(chunk) == "" {
+		for _, message := range r.formatter.FormatTelegramHTML(event.Text) {
+			if strings.TrimSpace(message.Text) == "" {
 				continue
 			}
-			_ = r.sender.SendMessage(context.Background(), live.chatID, stream.OutboundMessage{Text: chunk})
+			_ = r.sender.SendMessage(context.Background(), live.chatID, message)
 		}
 	case EventApprovalRequested:
-		for _, chunk := range r.formatter.Format(event.Text) {
-			if strings.TrimSpace(chunk) == "" {
+		for _, message := range r.formatter.FormatTelegramHTML(event.Text) {
+			if strings.TrimSpace(message.Text) == "" {
 				continue
 			}
+			message.QuickReplies = []string{"是", "否"}
 			_ = r.sender.SendMessage(context.Background(), live.chatID, stream.OutboundMessage{
-				Text:         chunk,
-				QuickReplies: []string{"是", "否"},
+				Text:         message.Text,
+				ParseMode:    message.ParseMode,
+				QuickReplies: message.QuickReplies,
 			})
 		}
 	}

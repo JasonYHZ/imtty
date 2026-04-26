@@ -2,8 +2,11 @@ package stream
 
 import "strings"
 
+const ParseModeHTML = "HTML"
+
 type OutboundMessage struct {
 	Text         string
+	ParseMode    string
 	QuickReplies []string
 }
 

@@ -15,6 +15,7 @@ func TestBotClientSendMessagePostsToTelegramAPI(t *testing.T) {
 	type requestBody struct {
 		ChatID      int64  `json:"chat_id"`
 		Text        string `json:"text"`
+		ParseMode   string `json:"parse_mode"`
 		ReplyMarkup struct {
 			Keyboard [][]struct {
 				Text string `json:"text"`
@@ -43,6 +44,7 @@ func TestBotClientSendMessagePostsToTelegramAPI(t *testing.T) {
 	client := NewBotClient(server.URL, "bot-token", server.Client())
 	err := client.SendMessage(context.Background(), 42, stream.OutboundMessage{
 		Text:         "hello from pump",
+		ParseMode:    stream.ParseModeHTML,
 		QuickReplies: []string{"是", "否"},
 	})
 	if err != nil {
@@ -55,6 +57,9 @@ func TestBotClientSendMessagePostsToTelegramAPI(t *testing.T) {
 
 	if gotBody.ChatID != 42 || gotBody.Text != "hello from pump" {
 		t.Fatalf("body = %#v, want chat_id=42 text=hello from pump", gotBody)
+	}
+	if gotBody.ParseMode != stream.ParseModeHTML {
+		t.Fatalf("parse_mode = %q, want %q", gotBody.ParseMode, stream.ParseModeHTML)
 	}
 
 	if len(gotBody.ReplyMarkup.Keyboard) != 1 || len(gotBody.ReplyMarkup.Keyboard[0]) != 2 {
@@ -112,6 +117,54 @@ func TestBotClientSetMenuButtonPostsWebAppButton(t *testing.T) {
 
 	if gotBody.MenuButton.WebApp.URL != "https://example.com/mini-app" {
 		t.Fatalf("menu_button.web_app.url = %q, want %q", gotBody.MenuButton.WebApp.URL, "https://example.com/mini-app")
+	}
+}
+
+func TestBotClientSendMessageRetriesWithoutParseModeWhenHTMLIsRejected(t *testing.T) {
+	type requestBody struct {
+		ChatID    int64  `json:"chat_id"`
+		Text      string `json:"text"`
+		ParseMode string `json:"parse_mode,omitempty"`
+	}
+
+	requests := make([]requestBody, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		var got requestBody
+		if err := json.NewDecoder(request.Body).Decode(&got); err != nil {
+			t.Fatalf("Decode() error = %v", err)
+		}
+		requests = append(requests, got)
+
+		writer.Header().Set("Content-Type", "application/json")
+		if len(requests) == 1 {
+			writer.WriteHeader(http.StatusBadRequest)
+			_, _ = writer.Write([]byte(`{"ok":false,"description":"Bad Request: can't parse entities"}`))
+			return
+		}
+		_, _ = writer.Write([]byte(`{"ok":true}`))
+	}))
+	defer server.Close()
+
+	client := NewBotClient(server.URL, "bot-token", server.Client())
+	err := client.SendMessage(context.Background(), 42, stream.OutboundMessage{
+		Text:      "<pre><code>broken",
+		ParseMode: stream.ParseModeHTML,
+	})
+	if err != nil {
+		t.Fatalf("SendMessage() error = %v", err)
+	}
+
+	if len(requests) != 2 {
+		t.Fatalf("len(requests) = %d, want 2", len(requests))
+	}
+	if requests[0].ParseMode != stream.ParseModeHTML {
+		t.Fatalf("first parse_mode = %q, want %q", requests[0].ParseMode, stream.ParseModeHTML)
+	}
+	if requests[1].ParseMode != "" {
+		t.Fatalf("fallback parse_mode = %q, want empty", requests[1].ParseMode)
+	}
+	if requests[1].Text != "<pre><code>broken" {
+		t.Fatalf("fallback text = %q, want original text", requests[1].Text)
 	}
 }
 

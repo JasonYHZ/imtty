@@ -43,9 +43,31 @@ func NewBotClient(baseURL string, token string, httpClient *http.Client) *BotCli
 }
 
 func (c *BotClient) SendMessage(ctx context.Context, chatID int64, message stream.OutboundMessage) error {
+	statusCode, err := c.postMessage(ctx, chatID, message)
+	if err != nil {
+		return err
+	}
+	if statusCode >= 300 && message.ParseMode != "" {
+		message.ParseMode = ""
+		statusCode, err = c.postMessage(ctx, chatID, message)
+		if err != nil {
+			return err
+		}
+	}
+	if statusCode >= 300 {
+		return fmt.Errorf("telegram sendMessage returned status %d", statusCode)
+	}
+
+	return nil
+}
+
+func (c *BotClient) postMessage(ctx context.Context, chatID int64, message stream.OutboundMessage) (int, error) {
 	payload := map[string]any{
 		"chat_id": chatID,
 		"text":    message.Text,
+	}
+	if message.ParseMode != "" {
+		payload["parse_mode"] = message.ParseMode
 	}
 
 	if len(message.QuickReplies) > 0 {
@@ -62,26 +84,22 @@ func (c *BotClient) SendMessage(ctx context.Context, chatID int64, message strea
 
 	body, err := json.Marshal(payload)
 	if err != nil {
-		return err
+		return 0, err
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bot"+c.token+"/sendMessage", bytes.NewReader(body))
 	if err != nil {
-		return err
+		return 0, err
 	}
 	request.Header.Set("Content-Type", "application/json")
 
 	response, err := c.httpClient.Do(request)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer response.Body.Close()
 
-	if response.StatusCode >= 300 {
-		return fmt.Errorf("telegram sendMessage returned status %d", response.StatusCode)
-	}
-
-	return nil
+	return response.StatusCode, nil
 }
 
 func (c *BotClient) SendChatAction(ctx context.Context, chatID int64, action string) error {

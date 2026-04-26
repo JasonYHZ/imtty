@@ -160,6 +160,8 @@ MVP 不定义：
 - 必须按 Telegram 消息体限制分片。
 - 必须保持同一 turn 内最终回复与审批提示的顺序。
 - 必须在短时间连续输出时做节流，避免发信风暴。
+- Telegram 富文本输出使用 Bot API `HTML` parse mode 的保守子集：普通文本必须 HTML escape，三反引号代码块渲染为 `<pre><code>`，行内反引号渲染为 `<code>`。
+- 不把 Codex Markdown 原样按 `MarkdownV2` 发送；复杂 Markdown 语义不是 MVP 输出合同。
 - Telegram 默认只发送最终 assistant 回复、审批提示和必要状态，不镜像原始终端过程流。
 - 当 bridge 已成功把 turn 提交给 Codex 后，Telegram 可显示原生 `typing` 状态，直到最终回复或审批提示返回。
 - commentary、工具调用轨迹、terminal 输出、prompt、状态栏、内部推理和类似 TUI 过程噪音默认不得发到 Telegram。

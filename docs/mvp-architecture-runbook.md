@@ -91,6 +91,8 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 职责：
 
 - 只格式化结构化最终回复与审批提示。
+- 使用 Telegram Bot API `HTML` parse mode 的保守子集渲染代码片段。
+- 普通文本必须 HTML escape；三反引号代码块渲染为 `<pre><code>`；行内反引号渲染为 `<code>`。
 - 按 `IMTTY_MESSAGE_CHUNK_BYTES` 分片。
 - 按 `IMTTY_FLUSH_INTERVAL_MS` 节流和批量 flush。
 - 保证同一 turn 内输出顺序不乱。
