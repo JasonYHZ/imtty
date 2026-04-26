@@ -52,16 +52,12 @@ func main() {
 	runtime := appserver.NewRuntime(sessionManager, stream.NewFormatter(cfg.MessageChunkBytes), botClient, cfg.CodexBin, cfg.PlanModeReasoning)
 	adapter := telegram.NewAdapter(registry, runtime, projectStore, botClient, mediaStore, documentAnalyzer)
 
-	var (
-		miniAppFS    fs.FS
-		miniAppIndex []byte
-	)
-	staticFS, indexHTML, err := miniapp.StaticAssetsFromDir("web/mini-app/dist")
+	var miniAppFS fs.FS
+	staticFS, err := miniapp.StaticAssetsFromDir("web/mini-app/dist")
 	if err != nil {
 		log.Printf("mini app static assets unavailable: %v", err)
 	} else {
 		miniAppFS = staticFS
-		miniAppIndex = indexHTML
 	}
 
 	mux := newMux(
@@ -73,7 +69,6 @@ func main() {
 			Adapter:     adapter,
 			BrowseRoots: cfg.ProjectBrowseRoots,
 			StaticFS:    miniAppFS,
-			IndexHTML:   miniAppIndex,
 		}),
 	)
 

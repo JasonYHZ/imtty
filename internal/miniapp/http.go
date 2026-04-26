@@ -19,7 +19,6 @@ type Options struct {
 	Adapter     *telegram.Adapter
 	BrowseRoots map[string]string
 	StaticFS    fs.FS
-	IndexHTML   []byte
 }
 
 func NewHandler(options Options) http.Handler {
@@ -62,47 +61,40 @@ func NewHandler(options Options) http.Handler {
 		staticHandler = http.StripPrefix("/mini-app/", http.FileServer(http.FS(options.StaticFS)))
 	}
 	pageHandler := http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		if request.URL.Path != "/mini-app" && request.URL.Path != "/mini-app/" {
-			if staticHandler != nil {
-				staticHandler.ServeHTTP(writer, request)
-				return
-			}
-			http.NotFound(writer, request)
+		if request.URL.Path == "/mini-app" {
+			http.Redirect(writer, request, "/mini-app/", http.StatusMovedPermanently)
 			return
 		}
 
-		if len(options.IndexHTML) == 0 {
+		if staticHandler == nil {
 			http.Error(writer, "Mini App 页面未构建", http.StatusServiceUnavailable)
 			return
 		}
 
-		writer.Header().Set("Content-Type", "text/html; charset=utf-8")
-		_, _ = writer.Write(options.IndexHTML)
+		staticHandler.ServeHTTP(writer, request)
 	})
 	mux.Handle("/mini-app", pageHandler)
 	mux.Handle("/mini-app/", pageHandler)
 	return mux
 }
 
-func StaticAssetsFromDir(path string) (fs.FS, []byte, error) {
+func StaticAssetsFromDir(path string) (fs.FS, error) {
 	staticFS := os.DirFS(path)
-	indexHTML, err := fs.ReadFile(staticFS, "index.html")
-	if err != nil {
-		return nil, nil, err
+	if _, err := fs.Stat(staticFS, "index.html"); err != nil {
+		return nil, err
 	}
-	return staticFS, indexHTML, nil
+	return staticFS, nil
 }
 
-func StaticAssetsFromEmbed(assets embed.FS, root string) (fs.FS, []byte, error) {
+func StaticAssetsFromEmbed(assets embed.FS, root string) (fs.FS, error) {
 	staticFS, err := fs.Sub(assets, root)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	indexHTML, err := fs.ReadFile(staticFS, "index.html")
-	if err != nil {
-		return nil, nil, err
+	if _, err := fs.Stat(staticFS, "index.html"); err != nil {
+		return nil, err
 	}
-	return staticFS, indexHTML, nil
+	return staticFS, nil
 }
 
 type commandPayload struct {

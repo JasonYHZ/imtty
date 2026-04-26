@@ -48,8 +48,7 @@ func TestHandlerBootstrapReturnsSessionsAndProjects(t *testing.T) {
 		BrowseRoots: map[string]string{
 			"dotfiles": filepath.Join(homeDir, ".dotfiles"),
 		},
-		StaticFS:  nil,
-		IndexHTML: nil,
+		StaticFS: nil,
 	})
 
 	request := httptest.NewRequest(http.MethodGet, "/mini-app/api/bootstrap", nil)
@@ -168,7 +167,7 @@ func TestHandlerProjectAddAndRemoveUseAdapterCommands(t *testing.T) {
 
 func TestHandlerServesStaticMiniAppAssets(t *testing.T) {
 	staticFS := fstest.MapFS{
-		"index.html":     {Data: []byte("<html>mini app</html>")},
+		"index.html":     {Data: []byte("<html>old mini app</html>")},
 		"assets/app.js":  {Data: []byte("console.log('ok')")},
 		"assets/app.css": {Data: []byte("body{}")},
 	}
@@ -177,19 +176,32 @@ func TestHandlerServesStaticMiniAppAssets(t *testing.T) {
 	})
 	adapter := telegram.NewAdapter(registry, &fakeSessionRuntime{}, &fakeProjectStore{}, nil, nil, nil)
 	handler := NewHandler(Options{
-		BotToken:  "bot-token",
-		OwnerID:   42,
-		Registry:  registry,
-		Adapter:   adapter,
-		StaticFS:  staticFS,
-		IndexHTML: []byte("<html>mini app</html>"),
+		BotToken: "bot-token",
+		OwnerID:  42,
+		Registry: registry,
+		Adapter:  adapter,
+		StaticFS: staticFS,
 	})
 
 	pageRequest := httptest.NewRequest(http.MethodGet, "/mini-app", nil)
 	pageRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(pageRecorder, pageRequest)
-	if pageRecorder.Code != http.StatusOK {
-		t.Fatalf("page status = %d, want %d", pageRecorder.Code, http.StatusOK)
+	if pageRecorder.Code != http.StatusMovedPermanently {
+		t.Fatalf("page status = %d, want %d", pageRecorder.Code, http.StatusMovedPermanently)
+	}
+	if location := pageRecorder.Header().Get("Location"); location != "/mini-app/" {
+		t.Fatalf("Location = %q, want /mini-app/", location)
+	}
+
+	staticFS["index.html"] = &fstest.MapFile{Data: []byte("<html>updated mini app</html>")}
+	indexRequest := httptest.NewRequest(http.MethodGet, "/mini-app/", nil)
+	indexRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(indexRecorder, indexRequest)
+	if indexRecorder.Code != http.StatusOK {
+		t.Fatalf("index status = %d, want %d", indexRecorder.Code, http.StatusOK)
+	}
+	if body := indexRecorder.Body.String(); !strings.Contains(body, "updated mini app") {
+		t.Fatalf("index body = %q, want updated index from static fs", body)
 	}
 
 	assetRequest := httptest.NewRequest(http.MethodGet, "/mini-app/assets/app.js", nil)

@@ -236,6 +236,8 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 5. Mini App 直接以 bridge 主机绝对路径请求目录浏览接口，支持返回父目录并一路浏览到 `/`。
 6. Mini App 通过结构化接口触发 `open / close / kill / project-add / project-remove`。
 7. 这些动作必须复用现有 bridge 语义，而不是重新实现一套 session 生命周期。
+8. Mini App 前端路由必须使用 hash 模式，例如 `/mini-app/#/sessions`；Go bridge 只负责提供 `/mini-app/` 下的静态构建产物和 `/mini-app/api/*`。
+9. `web/mini-app/dist/` 必须作为静态目录直接提供；`npm run build` 后，新请求应从磁盘读取最新 `index.html` 与 asset 文件，不要求重启 bridge。
 
 ### 5.3 `/close`
 
