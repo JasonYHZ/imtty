@@ -19,17 +19,24 @@ type Client struct {
 	cwd        string
 	httpClient *http.Client
 
-	mu              sync.Mutex
-	conn            *websocket.Conn
-	nextID          int
-	pending         map[string]chan rpcEnvelope
-	events          chan Event
-	threadID        string
-	pendingApproval *approvalRequest
-	closed          bool
+	mu               sync.Mutex
+	conn             *websocket.Conn
+	nextID           int
+	pending          map[string]chan rpcEnvelope
+	events           chan Event
+	threadID         string
+	pendingApproval  *approvalRequest
+	pendingUserInput *userInputRequest
+	closed           bool
 }
 
 type approvalRequest struct {
+	ID     string
+	Method string
+	Params map[string]any
+}
+
+type userInputRequest struct {
 	ID     string
 	Method string
 	Params map[string]any
@@ -109,6 +116,7 @@ func (c *Client) EnsureThread(ctx context.Context, threadID string) (ThreadState
 	c.mu.Lock()
 	c.threadID = newThreadID
 	c.pendingApproval = nil
+	c.pendingUserInput = nil
 	c.mu.Unlock()
 	return ThreadState{
 		ThreadID:  newThreadID,
@@ -224,9 +232,7 @@ func (c *Client) ResolveApproval(ctx context.Context, decision Decision) error {
 		return errors.New("no pending approval")
 	}
 
-	result := map[string]any{
-		"decision": string(decision),
-	}
+	result := approvalResponsePayload(pending, decision)
 	if pending.Method == "item/permissions/requestApproval" {
 		result = map[string]any{
 			"permissions": pending.Params["permissions"],
@@ -248,6 +254,34 @@ func (c *Client) ResolveApproval(ctx context.Context, decision Decision) error {
 	return nil
 }
 
+func (c *Client) ResolveUserInput(ctx context.Context, text string) error {
+	c.mu.Lock()
+	pending := c.pendingUserInput
+	c.mu.Unlock()
+
+	if pending == nil {
+		return errors.New("no pending user input request")
+	}
+
+	result, err := userInputResponsePayload(pending.Params, text)
+	if err != nil {
+		return err
+	}
+
+	if err := c.writeJSON(map[string]any{
+		"jsonrpc": "2.0",
+		"id":      pending.ID,
+		"result":  result,
+	}); err != nil {
+		return err
+	}
+
+	c.mu.Lock()
+	c.pendingUserInput = nil
+	c.mu.Unlock()
+	return nil
+}
+
 func (c *Client) Events() <-chan Event {
 	return c.events
 }
@@ -256,6 +290,12 @@ func (c *Client) HasPendingApproval() bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.pendingApproval != nil
+}
+
+func (c *Client) HasPendingUserInput() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.pendingUserInput != nil
 }
 
 func (c *Client) Close() error {
@@ -391,11 +431,29 @@ func (c *Client) handleInboundRequestOrNotification(envelope rpcEnvelope) {
 			Method: envelope.Method,
 			Params: envelope.Params,
 		}
+		c.pendingUserInput = nil
 		c.mu.Unlock()
 
 		c.events <- Event{
 			Kind: EventApprovalRequested,
 			Text: approvalText(envelope.Method, envelope.Params),
+		}
+		return
+	}
+
+	if envelope.ID != nil && envelope.Method == "item/tool/requestUserInput" {
+		c.mu.Lock()
+		c.pendingUserInput = &userInputRequest{
+			ID:     fmt.Sprint(envelope.ID),
+			Method: envelope.Method,
+			Params: envelope.Params,
+		}
+		c.pendingApproval = nil
+		c.mu.Unlock()
+
+		c.events <- Event{
+			Kind: EventUserInputRequested,
+			Text: userInputText(envelope.Params),
 		}
 		return
 	}
@@ -471,7 +529,7 @@ func turnErrorText(item map[string]any) string {
 
 func isApprovalMethod(method string) bool {
 	switch method {
-	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval":
+	case "item/commandExecution/requestApproval", "item/fileChange/requestApproval", "item/permissions/requestApproval", "execCommandApproval", "applyPatchApproval":
 		return true
 	default:
 		return false
@@ -486,21 +544,207 @@ func isMemoryMaintenanceReport(text string) bool {
 }
 
 func approvalText(method string, params map[string]any) string {
+	var lines []string
 	switch method {
 	case "item/commandExecution/requestApproval":
 		if command, _ := params["command"].(string); strings.TrimSpace(command) != "" {
-			return "需要审批的命令：\n" + command
+			lines = append(lines, "需要审批的命令：", command)
 		}
-	case "item/fileChange/requestApproval":
+	case "execCommandApproval":
+		if command := commandArrayText(params["command"]); command != "" {
+			lines = append(lines, "需要审批的命令：", command)
+		}
 		if reason, _ := params["reason"].(string); strings.TrimSpace(reason) != "" {
-			return "需要确认文件变更：\n" + reason
+			lines = append(lines, "原因："+strings.TrimSpace(reason))
+		}
+	case "item/fileChange/requestApproval", "applyPatchApproval":
+		lines = append(lines, "需要确认文件变更。")
+		if reason, _ := params["reason"].(string); strings.TrimSpace(reason) != "" {
+			lines = append(lines, "原因："+strings.TrimSpace(reason))
+		}
+		if grantRoot, _ := params["grantRoot"].(string); strings.TrimSpace(grantRoot) != "" {
+			lines = append(lines, "授权范围："+strings.TrimSpace(grantRoot))
+		}
+		if files := fileChangePaths(params["fileChanges"]); len(files) > 0 {
+			lines = append(lines, "文件："+strings.Join(files, ", "))
 		}
 	case "item/permissions/requestApproval":
+		lines = append(lines, "需要确认权限请求。")
 		if reason, _ := params["reason"].(string); strings.TrimSpace(reason) != "" {
-			return "需要确认权限请求：\n" + reason
+			lines = append(lines, "原因："+strings.TrimSpace(reason))
 		}
 	}
-	return "当前操作需要审批，请回复 是 或 否"
+	if cwd, _ := params["cwd"].(string); strings.TrimSpace(cwd) != "" {
+		lines = append(lines, "工作目录："+strings.TrimSpace(cwd))
+	}
+	lines = append(lines, "请回复 是 或 否。")
+	if len(lines) == 1 {
+		return "当前操作需要审批，请回复 是 或 否。"
+	}
+	return strings.Join(lines, "\n")
+}
+
+func approvalResponsePayload(pending *approvalRequest, decision Decision) map[string]any {
+	value := string(decision)
+	if pending.Method == "execCommandApproval" || pending.Method == "applyPatchApproval" {
+		if decision == DecisionApprove {
+			value = "approved"
+		} else {
+			value = "denied"
+		}
+	}
+	return map[string]any{
+		"decision": value,
+	}
+}
+
+func userInputText(params map[string]any) string {
+	questions := questionList(params)
+	if len(questions) == 0 {
+		return "Codex 需要补充输入。请直接回复文本。"
+	}
+
+	lines := []string{"Codex 需要你补充输入："}
+	for _, question := range questions {
+		header := stringValue(question["header"])
+		text := stringValue(question["question"])
+		id := stringValue(question["id"])
+		title := strings.TrimSpace(text)
+		if header != "" {
+			title = header + "：" + title
+		}
+		if id != "" && len(questions) > 1 {
+			title += "（" + id + "）"
+		}
+		lines = append(lines, title)
+		for _, option := range optionList(question["options"]) {
+			label := stringValue(option["label"])
+			if label == "" {
+				continue
+			}
+			description := stringValue(option["description"])
+			if description != "" {
+				lines = append(lines, "- "+label+"："+description)
+			} else {
+				lines = append(lines, "- "+label)
+			}
+		}
+	}
+	if len(questions) == 1 {
+		lines = append(lines, "请直接回复选项文字或你的答案。")
+	} else {
+		lines = append(lines, "请每行按 question_id=答案 回复。")
+	}
+	return strings.Join(lines, "\n")
+}
+
+func userInputResponsePayload(params map[string]any, text string) (map[string]any, error) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" {
+		return nil, errors.New("当前等待 Codex 输入请求，请回复选项文字或答案")
+	}
+
+	questions := questionList(params)
+	if len(questions) == 0 {
+		return nil, errors.New("当前 Codex 输入请求缺少问题定义")
+	}
+
+	answers := make(map[string]any, len(questions))
+	if len(questions) == 1 {
+		id := stringValue(questions[0]["id"])
+		if id == "" {
+			return nil, errors.New("当前 Codex 输入请求缺少问题 ID")
+		}
+		answers[id] = map[string]any{"answers": []string{trimmed}}
+		return map[string]any{"answers": answers}, nil
+	}
+
+	parsed := parseQuestionAnswers(trimmed)
+	for _, question := range questions {
+		id := stringValue(question["id"])
+		if id == "" {
+			return nil, errors.New("当前 Codex 输入请求缺少问题 ID")
+		}
+		answer := strings.TrimSpace(parsed[id])
+		if answer == "" {
+			return nil, errors.New("当前等待多个 Codex 输入问题，请每行按 question_id=答案 回复")
+		}
+		answers[id] = map[string]any{"answers": []string{answer}}
+	}
+	return map[string]any{"answers": answers}, nil
+}
+
+func parseQuestionAnswers(text string) map[string]string {
+	result := map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		separator := strings.Index(line, "=")
+		if separator < 0 {
+			separator = strings.Index(line, ":")
+		}
+		if separator <= 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:separator])
+		value := strings.TrimSpace(line[separator+1:])
+		if key != "" && value != "" {
+			result[key] = value
+		}
+	}
+	return result
+}
+
+func questionList(params map[string]any) []map[string]any {
+	raw, _ := params["questions"].([]any)
+	questions := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		question, ok := item.(map[string]any)
+		if ok {
+			questions = append(questions, question)
+		}
+	}
+	return questions
+}
+
+func optionList(value any) []map[string]any {
+	raw, _ := value.([]any)
+	options := make([]map[string]any, 0, len(raw))
+	for _, item := range raw {
+		option, ok := item.(map[string]any)
+		if ok {
+			options = append(options, option)
+		}
+	}
+	return options
+}
+
+func commandArrayText(value any) string {
+	raw, _ := value.([]any)
+	parts := make([]string, 0, len(raw))
+	for _, item := range raw {
+		text := stringValue(item)
+		if text != "" {
+			parts = append(parts, text)
+		}
+	}
+	return strings.Join(parts, " ")
+}
+
+func fileChangePaths(value any) []string {
+	changes, ok := value.(map[string]any)
+	if !ok {
+		return nil
+	}
+	paths := make([]string, 0, len(changes))
+	for path := range changes {
+		if strings.TrimSpace(path) != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths
 }
 
 func objectField(payload map[string]any, key string) (map[string]any, bool) {

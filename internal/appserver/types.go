@@ -5,12 +5,13 @@ import "imtty/internal/session"
 type EventKind string
 
 const (
-	EventFinalAnswer       EventKind = "final_answer"
-	EventApprovalRequested EventKind = "approval_requested"
-	EventTokenUsageUpdated EventKind = "token_usage_updated"
-	EventModelRerouted     EventKind = "model_rerouted"
-	EventTurnError         EventKind = "turn_error"
-	EventConnectionClosed  EventKind = "connection_closed"
+	EventFinalAnswer        EventKind = "final_answer"
+	EventApprovalRequested  EventKind = "approval_requested"
+	EventUserInputRequested EventKind = "user_input_requested"
+	EventTokenUsageUpdated  EventKind = "token_usage_updated"
+	EventModelRerouted      EventKind = "model_rerouted"
+	EventTurnError          EventKind = "turn_error"
+	EventConnectionClosed   EventKind = "connection_closed"
 )
 
 type Event struct {

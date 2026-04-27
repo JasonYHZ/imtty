@@ -12,7 +12,7 @@ It keeps Codex running on your own machine, inside `tmux`, and sends prompts, ap
 - `tmux`-backed Codex sessions named `codex-{project}`
 - Codex `app-server` integration with structured event output
 - final-answer-first Telegram replies with terminal noise suppressed
-- explicit human approval flow with `Yes` / `No` quick replies
+- explicit human approval flow with full Telegram text prompts and manual replies
 - project whitelist with dynamic add/remove commands
 - session reattach after bridge restart
 - local desktop attach protection for writable `tmux` clients

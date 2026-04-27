@@ -437,6 +437,122 @@ func TestClientTracksPendingApprovalRequests(t *testing.T) {
 	}
 }
 
+func TestClientTracksLegacyExecApprovalRequests(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+
+	client := NewClient(server.wsURL(), "/tmp/project-a")
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer client.Close()
+
+	server.withConn(func(conn *websocket.Conn) {
+		server.request(conn, "approval-legacy-1", "execCommandApproval", map[string]any{
+			"callId":         "call-1",
+			"conversationId": "thread-123",
+			"cwd":            "/tmp/project-a",
+			"command":        []any{"qlmanage", "-t", "-s", "1200", "-o", "/tmp", "public/og-image.svg"},
+			"parsedCmd":      []any{},
+			"reason":         "Allow Quick Look to render the local SVG Open Graph card.",
+		})
+	})
+
+	event := waitForEvent(t, client.Events())
+	if event.Kind != EventApprovalRequested {
+		t.Fatalf("Event.Kind = %v, want approval request", event.Kind)
+	}
+	for _, want := range []string{"qlmanage -t -s 1200 -o /tmp public/og-image.svg", "Allow Quick Look", "/tmp/project-a"} {
+		if !strings.Contains(event.Text, want) {
+			t.Fatalf("Event.Text = %q, want %q", event.Text, want)
+		}
+	}
+
+	if err := client.ResolveApproval(context.Background(), DecisionApprove); err != nil {
+		t.Fatalf("ResolveApproval() error = %v", err)
+	}
+
+	response := server.waitForResponse(t)
+	resultMap, ok := response.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("response.Result = %#v, want object", response.Result)
+	}
+	if resultMap["decision"] != "approved" {
+		t.Fatalf("decision = %#v, want %q", resultMap["decision"], "approved")
+	}
+}
+
+func TestClientHandlesToolRequestUserInput(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+
+	client := NewClient(server.wsURL(), "/tmp/project-a")
+	if err := client.Connect(context.Background()); err != nil {
+		t.Fatalf("Connect() error = %v", err)
+	}
+	defer client.Close()
+
+	server.withConn(func(conn *websocket.Conn) {
+		server.request(conn, "input-1", "item/tool/requestUserInput", map[string]any{
+			"threadId": "thread-123",
+			"turnId":   "turn-1",
+			"itemId":   "item-1",
+			"questions": []any{
+				map[string]any{
+					"id":       "mode",
+					"header":   "模式",
+					"question": "选择运行方式",
+					"options": []any{
+						map[string]any{"label": "快速", "description": "只做最小检查"},
+						map[string]any{"label": "完整", "description": "执行完整验证"},
+						map[string]any{"label": "跳过", "description": "暂不执行"},
+					},
+				},
+			},
+		})
+	})
+
+	event := waitForEvent(t, client.Events())
+	if event.Kind != EventUserInputRequested {
+		t.Fatalf("Event.Kind = %v, want user input request", event.Kind)
+	}
+	for _, want := range []string{"选择运行方式", "快速", "完整", "跳过"} {
+		if !strings.Contains(event.Text, want) {
+			t.Fatalf("Event.Text = %q, want %q", event.Text, want)
+		}
+	}
+
+	if err := client.ResolveUserInput(context.Background(), "完整"); err != nil {
+		t.Fatalf("ResolveUserInput() error = %v", err)
+	}
+
+	response := server.waitForResponse(t)
+	resultMap, ok := response.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("response.Result = %#v, want object", response.Result)
+	}
+	answersMap, ok := resultMap["answers"].(map[string]any)
+	if !ok {
+		t.Fatalf("answers = %#v, want object", resultMap["answers"])
+	}
+	modeMap, ok := answersMap["mode"].(map[string]any)
+	if !ok {
+		t.Fatalf("answers.mode = %#v, want object", answersMap["mode"])
+	}
+	modeAnswers, ok := modeMap["answers"].([]any)
+	if !ok || len(modeAnswers) != 1 || modeAnswers[0] != "完整" {
+		t.Fatalf("answers.mode.answers = %#v, want 完整", modeMap["answers"])
+	}
+}
+
 func TestClientRespondsToApprovalDecision(t *testing.T) {
 	server := newFakeAppServer(t)
 	defer server.Close()

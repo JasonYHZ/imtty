@@ -40,7 +40,7 @@
 目标用户是个人开发者本人。典型场景：
 
 - 离开桌面但需要继续向 Codex 补充指令。
-- 需要在手机上看到 Codex 输出并处理 `y/n` 风格审批。
+- 需要在手机上看到 Codex 输出并处理命令审批或结构化输入请求。
 - Bridge 进程重启后，希望继续接管先前项目的 tmux 上下文。
 - 同时维护多个项目，但在 Telegram 中只操作当前 active project。
 
@@ -70,13 +70,14 @@
 4. 转写文本按普通文本输入当前 active session。
 5. 如果未配置转写器、转写失败或当前会话被本地终端占用，Telegram 必须返回明确状态提示和下一步动作。
 
-### 6.3 审批交互
+### 6.3 审批与结构化输入交互
 
-1. Codex 输出中出现 `y/n`、`Yes/No` 等审批提示。
-2. Bridge 检测到审批迹象，可在 Telegram 侧附带 `Yes` / `No` 快捷回复。
-3. 用户点击快捷回复或手动输入文本。
-4. Bridge 统一把用户选择回注为文本输入。
-5. 文本回注是唯一真相源；快捷回复只是输入便利层。
+1. Codex app-server 发出命令、文件或权限审批请求。
+2. Bridge 将命令、原因、工作目录、权限或文件范围完整展示到 Telegram。
+3. Telegram 不附加 `Yes` / `No` 键盘；用户用普通文本回复 `是` 或 `否`。
+4. 如果 Codex 发起 `request_user_input` 这类结构化输入请求，Bridge 必须完整展示问题和选项。
+5. 用户按提示回复选项文字、答案，或在多问题场景下按 `question_id=答案` 分行回复。
+6. Bridge 将用户回复转换成 app-server 结构化 response，不把它当成新的普通 turn。
 
 ### 6.4 关闭与终止
 
@@ -108,7 +109,8 @@ MVP 对外输入模型只允许六类：
 
 - bot command
 - plain text
-- quick reply approval
+- pending approval response
+- pending tool input response
 - single image message
 - single file message
 - single voice message
@@ -209,7 +211,7 @@ MVP 不定义：
 - Mini App API 必须通过 Telegram `initData` 与 owner 白名单校验，不能复用 webhook secret。
 - Bot token 只通过环境变量配置，不写入代码或文档示例中的真实值。
 - 不在 bridge 中自动批准任何 Codex 审批。
-- 不把快捷回复当成独立审批协议；它只是普通文本输入包装。
+- 不把 Telegram 键盘按钮当成审批协议；审批和结构化输入都以 app-server request/response 为准。
 
 ## 12. MVP 范围
 
@@ -227,7 +229,8 @@ MVP 必须包含：
 - Telegram voice 的本地转写文本输入透传
 - Codex app-server 连接、thread start-resume、turn start
 - 结构化最终回复分片与节流
-- 结构化审批请求与 `Yes/No` 快捷回复映射
+- 结构化审批请求与用户文本回复映射
+- `request_user_input` 结构化问题展示与用户文本回复映射
 - bridge 重启后的 session reattach
 
 MVP 明确不包含：
@@ -255,14 +258,15 @@ MVP 明确不包含：
 
 1. `/open project-a` 能创建或绑定 `codex-project-a`，随后普通文本可进入 Codex。
 2. Codex 最终回复能按 Telegram 限制分段发送，不丢顺序，不泄漏过程态。
-3. 遇到 `y/n` 风格审批时，可映射出 `Yes/No` 快捷回复，但最终仍以文本回注为唯一真相源。
-4. Bridge 重启后能重新接管已有 tmux session，不要求重启 Codex。
-5. Codex 退出或 tmux 丢失时，IM 侧会收到明确状态提示和下一步恢复动作。
-6. 单用户下可以并存多个 project session，但任一时刻只有一个 active session 绑定到当前 IM 会话。
-7. `/kill` 后该 session 不再出现在 `/list` 中；如果当前没有 active session，`/status` 只会提示下一步动作。
-8. `/projects` 只显示可打开项目，`/list` 不显示项目白名单。
-9. `/project_add demo /abs/path` 后，`/projects` 能立即看到 `demo`，bridge 重启后仍然保留。
-10. `/project_remove demo` 后，`demo` 会从 `/projects` 中消失，且 `/open demo` 会被拒绝。
+3. 遇到命令、文件或权限审批时，Telegram 能展示完整上下文，用户用普通文本回复 `是` 或 `否` 后可正确转换成 app-server approval response。
+4. 遇到 3 选项或问卷式 `request_user_input` 时，Telegram 能展示完整问题和选项，用户普通文本回复后可正确转换成 app-server tool input response。
+5. Bridge 重启后能重新接管已有 tmux session，不要求重启 Codex。
+6. Codex 退出或 tmux 丢失时，IM 侧会收到明确状态提示和下一步恢复动作。
+7. 单用户下可以并存多个 project session，但任一时刻只有一个 active session 绑定到当前 IM 会话。
+8. `/kill` 后该 session 不再出现在 `/list` 中；如果当前没有 active session，`/status` 只会提示下一步动作。
+9. `/projects` 只显示可打开项目，`/list` 不显示项目白名单。
+10. `/project_add demo /abs/path` 后，`/projects` 能立即看到 `demo`，bridge 重启后仍然保留。
+11. `/project_remove demo` 后，`demo` 会从 `/projects` 中消失，且 `/open demo` 会被拒绝。
 11. Mini App 可以显示 active session、session 列表与 project 列表，并触发等价控制动作。
 12. Mini App 添加项目时，可以通过系统级目录选择器从 `~` 开始浏览 bridge 主机目录，并一路返回到 `/`，而不是只能手填绝对路径。
 13. 当桌面端已经 attach 到同一 tmux session 时，Telegram 普通文本、审批回复和 `/kill` 都会被拒绝，并得到明确下一步动作提示。

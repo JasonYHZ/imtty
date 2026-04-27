@@ -23,7 +23,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 
 - 验证 webhook secret。
 - 解析 Telegram update。
-- 区分 bot command、plain text、quick reply approval、single image message、single file message、single voice message。
+- 区分 bot command、plain text、pending approval response、pending tool input response、single image message、single file message、single voice message。
 - 把输入转成内部命令或文本事件。
 
 边界：
@@ -80,7 +80,8 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 - 将用户图片消息转换成 `localImage` + 可选 caption 的 app-server 输入。
 - 将用户文本/代码文件或 PDF 转换成内容提取后的 app-server 文本输入。
 - 将用户语音消息转换成本地转写后的 app-server 文本输入。
-- 当存在挂起审批时，将 `Yes/No` 快捷回复转换成结构化 approval response。
+- 当存在挂起审批时，将用户文本回复转换成结构化 approval response。
+- 当 Codex 发起结构化用户输入请求时，将用户文本回复转换成对应 tool input response。
 
 边界：
 
@@ -107,7 +108,9 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 职责：
 
 - 把 app-server 的 command/file/permissions approval request 转成 Telegram 可读提示。
-- 为 Telegram 侧附加 `Yes/No` 快捷回复。
+- 审批提示必须包含命令、原因、工作目录、权限或文件范围等可见上下文。
+- Telegram 侧不附加 `Yes/No` 键盘；用户必须用普通文本回复 `是` 或 `否`，避免隐藏 Codex 原生审批或输入请求里的更多选项。
+- `item/tool/requestUserInput` 这类非审批输入请求必须按问题和选项完整展示，不得压缩成审批按钮。
 
 边界：
 
@@ -189,10 +192,11 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 1. Telegram webhook adapter 判断为 plain text。
 2. Session registry 解析当前 active session。
 3. 如果当前有挂起审批，则把文本解释为结构化 approval response。
-4. 否则 App-server runtime 向对应 thread 发出 `turn/start`。
-5. App-server 事件流返回 `final_answer` 或审批请求。
-6. Output formatter 分片、节流后发回 Telegram。
-7. 如果事件流返回 turn 错误或 app-server 连接断开，bridge 必须停止 Telegram typing 并发出状态提示，不能让聊天窗口一直停留在“正在输入”。
+4. 如果当前有挂起的 Codex 用户输入请求，则把文本解释为结构化 tool input response。
+5. 否则 App-server runtime 向对应 thread 发出 `turn/start`。
+6. App-server 事件流返回 `final_answer`、审批请求或用户输入请求。
+7. Output formatter 分片、节流后发回 Telegram。
+8. 如果事件流返回 turn 错误或 app-server 连接断开，bridge 必须停止 Telegram typing 并发出状态提示，不能让聊天窗口一直停留在“正在输入”。
 
 ### 5.2.1 `/model`、`/reasoning`、`/plan_mode`
 

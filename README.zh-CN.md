@@ -12,7 +12,7 @@
 - 基于 `tmux` 的 Codex 会话，会话名固定为 `codex-{project}`
 - Codex `app-server` 集成，使用结构化事件输出
 - Telegram 默认只返回 final answer，压制终端噪音
-- 保留显式人工审批，支持 `Yes` / `No` 快捷回复
+- 保留显式人工审批，通过完整 Telegram 文本提示和手动回复处理
 - 项目白名单，支持动态增删
 - bridge 重启后接管已有会话
 - 本地桌面可写 attach 冲突保护

@@ -115,14 +115,14 @@ func (a *Adapter) HandleUpdate(ctx context.Context, update Update) []string {
 
 	if handled, err := a.runtime.SubmitApproval(ctx, chatIDFromContext(ctx), active, text); handled {
 		if err != nil {
-			if err == appserver.ErrApprovalReplyRequired {
+			if err == appserver.ErrApprovalReplyRequired || err == appserver.ErrUserInputReplyRequired {
 				return []string{err.Error()}
 			}
-			return []string{fmt.Sprintf("处理审批回复失败：%v", err)}
+			return []string{fmt.Sprintf("处理待回复输入失败：%v", err)}
 		}
 		return nil
 	} else if err != nil {
-		return []string{fmt.Sprintf("处理审批回复失败：%v", err)}
+		return []string{fmt.Sprintf("处理待回复输入失败：%v", err)}
 	}
 
 	if err := a.runtime.SubmitText(ctx, chatIDFromContext(ctx), active, text); err != nil {

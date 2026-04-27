@@ -15,7 +15,9 @@ import (
 	"imtty/internal/tmux"
 )
 
-var ErrApprovalReplyRequired = errors.New("当前等待审批，请先回复 是/否")
+var ErrApprovalReplyRequired = errors.New("当前等待审批，请先回复 是 或 否")
+
+var ErrUserInputReplyRequired = errors.New("当前等待 Codex 输入请求，请回复选项文字或答案")
 
 type SessionHost interface {
 	EnsureSession(ctx context.Context, sessionName string, root string) error
@@ -237,8 +239,15 @@ func (r *Runtime) SubmitApproval(ctx context.Context, _ int64, view session.View
 	if err != nil {
 		return false, err
 	}
-	if !live.client.HasPendingApproval() {
+	if !live.client.HasPendingApproval() && !live.client.HasPendingUserInput() {
 		return false, nil
+	}
+
+	if live.client.HasPendingUserInput() {
+		if strings.TrimSpace(text) == "" {
+			return true, ErrUserInputReplyRequired
+		}
+		return true, live.client.ResolveUserInput(ctx, text)
 	}
 
 	decision, ok := normalizeDecision(text)
@@ -506,11 +515,19 @@ func (r *Runtime) sendEvent(live *liveSession, event Event) {
 			if strings.TrimSpace(message.Text) == "" {
 				continue
 			}
-			message.QuickReplies = []string{"是", "否"}
 			_ = r.sender.SendMessage(context.Background(), live.chatID, stream.OutboundMessage{
-				Text:         message.Text,
-				ParseMode:    message.ParseMode,
-				QuickReplies: message.QuickReplies,
+				Text:      message.Text,
+				ParseMode: message.ParseMode,
+			})
+		}
+	case EventUserInputRequested:
+		for _, message := range r.formatter.FormatTelegramHTML(event.Text) {
+			if strings.TrimSpace(message.Text) == "" {
+				continue
+			}
+			_ = r.sender.SendMessage(context.Background(), live.chatID, stream.OutboundMessage{
+				Text:      message.Text,
+				ParseMode: message.ParseMode,
 			})
 		}
 	case EventTurnError:

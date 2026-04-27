@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/url"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -254,6 +255,79 @@ func TestRuntimeStopsTypingAndNotifiesWhenTurnErrorArrives(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 	if sender.chatActionCount("typing") != initialActions {
 		t.Fatalf("typing chat actions kept increasing after turn error")
+	}
+}
+
+func TestRuntimeForwardsApprovalWithoutQuickReplies(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+	server.onRequest("thread/start", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{
+			"thread": map[string]any{"id": "thread-123"},
+		})
+	})
+	server.onRequest("model/list", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{
+			"data": []map[string]any{{
+				"id":                        "gpt-5.5",
+				"model":                     "gpt-5.5",
+				"displayName":               "GPT-5.5",
+				"defaultReasoningEffort":    "high",
+				"supportedReasoningEfforts": []string{"medium", "high", "xhigh"},
+			}},
+		})
+	})
+
+	wsURL, err := url.Parse(server.wsURL())
+	if err != nil {
+		t.Fatalf("url.Parse() error = %v", err)
+	}
+	port, err := strconv.Atoi(wsURL.Port())
+	if err != nil {
+		t.Fatalf("Atoi(port) error = %v", err)
+	}
+
+	host := &fakeSessionHost{meta: tmux.SessionRuntimeInfo{Port: port}}
+	sender := &fakeRuntimeSender{}
+	runtime := NewRuntime(host, stream.NewFormatter(3500), sender, "codex", "xhigh")
+	view := session.View{
+		Name:    "codex-project-a",
+		Project: "project-a",
+		Root:    "/tmp/project-a",
+	}
+
+	if err := runtime.OpenSession(context.Background(), 42, view); err != nil {
+		t.Fatalf("OpenSession() error = %v", err)
+	}
+	defer runtime.CloseSession(view.Name)
+
+	server.withConn(func(conn *websocket.Conn) {
+		server.request(conn, "approval-1", "execCommandApproval", map[string]any{
+			"callId":         "call-1",
+			"conversationId": "thread-123",
+			"cwd":            "/tmp/project-a",
+			"command":        []any{"qlmanage", "-t", "public/og-image.svg"},
+			"parsedCmd":      []any{},
+			"reason":         "render image",
+		})
+	})
+
+	waitForCondition(t, func() bool {
+		return sender.messageCount() == 1
+	})
+
+	sender.mu.Lock()
+	message := sender.messages[0]
+	sender.mu.Unlock()
+	if len(message.QuickReplies) != 0 {
+		t.Fatalf("QuickReplies = %#v, want none", message.QuickReplies)
+	}
+	if !strings.Contains(message.Text, "qlmanage -t public/og-image.svg") {
+		t.Fatalf("message.Text = %q, want command", message.Text)
 	}
 }
 
