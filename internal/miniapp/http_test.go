@@ -165,6 +165,56 @@ func TestHandlerProjectAddAndRemoveUseAdapterCommands(t *testing.T) {
 	}
 }
 
+func TestHandlerControlActionsUseAdapterCommands(t *testing.T) {
+	registry := session.NewRegistry(map[string]string{
+		"project-a": "/tmp/project-a",
+	})
+	runtime := &fakeSessionRuntime{}
+	store := &fakeProjectStore{}
+	adapter := telegram.NewAdapter(registry, runtime, store, nil, nil, nil)
+	view, err := registry.Open("project-a")
+	if err != nil {
+		t.Fatalf("registry.Open(project-a) error = %v", err)
+	}
+	if _, err := registry.SetState(view.Project, session.StateRunning); err != nil {
+		t.Fatalf("registry.SetState(project-a) error = %v", err)
+	}
+	handler := NewHandler(Options{
+		BotToken: "bot-token",
+		OwnerID:  42,
+		Registry: registry,
+		Adapter:  adapter,
+		Runtime:  runtime,
+	})
+
+	initData := signedInitData(t, "bot-token", 42, "jason", time.Unix(1_700_000_000, 0))
+	cases := []struct {
+		path string
+		body string
+		want string
+	}{
+		{path: "/mini-app/api/clear", body: `{}`, want: "已清空当前对话上下文"},
+		{path: "/mini-app/api/model", body: `{"model":"gpt-5.4"}`, want: "已设置待生效模型"},
+		{path: "/mini-app/api/reasoning", body: `{"reasoning":"xhigh"}`, want: "已设置待生效 reasoning"},
+		{path: "/mini-app/api/plan-mode", body: `{"mode":"plan"}`, want: "已设置待生效计划模式"},
+	}
+
+	for _, tc := range cases {
+		request := httptest.NewRequest(http.MethodPost, tc.path, strings.NewReader(tc.body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("X-Telegram-Init-Data", initData)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("%s status = %d, want %d body=%s", tc.path, recorder.Code, http.StatusOK, recorder.Body.String())
+		}
+		if body := recorder.Body.String(); !strings.Contains(body, tc.want) {
+			t.Fatalf("%s body = %q, want contains %q", tc.path, body, tc.want)
+		}
+	}
+}
+
 func TestHandlerServesStaticMiniAppAssets(t *testing.T) {
 	staticFS := fstest.MapFS{
 		"index.html":     {Data: []byte("<html>old mini app</html>")},

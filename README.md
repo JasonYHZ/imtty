@@ -392,7 +392,7 @@ Mini App frontend lives under:
 
 - `web/mini-app/`
 
-The repository currently checks in `web/mini-app/dist/` so the Go bridge can serve the built assets directly. Mini App routes must use hash-style URLs under `/mini-app/` so frontend navigation stays client-side and the Go bridge can serve the whole dist directory with `http.FileServer`. After `npm run build`, refreshed Mini App requests read the updated dist files without restarting the bridge process.
+The repository currently checks in `web/mini-app/dist/` so the Go bridge can serve the built assets directly. The Mini App is a static frontend build that calls bridge-owned `/mini-app/api/*` endpoints at runtime. After `npm run build`, refreshed Mini App requests read the updated dist files without restarting the bridge process.
 
 ## Documentation
 

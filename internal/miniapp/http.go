@@ -1,12 +1,14 @@
 package miniapp
 
 import (
+	"context"
 	"embed"
 	"encoding/json"
 	"io/fs"
 	"net/http"
 	"os"
 
+	"imtty/internal/appserver"
 	"imtty/internal/config"
 	"imtty/internal/session"
 	"imtty/internal/telegram"
@@ -17,6 +19,7 @@ type Options struct {
 	OwnerID     int64
 	Registry    *session.Registry
 	Adapter     *telegram.Adapter
+	Runtime     telegram.SessionRuntime
 	BrowseRoots map[string]string
 	StaticFS    fs.FS
 }
@@ -24,8 +27,8 @@ type Options struct {
 func NewHandler(options Options) http.Handler {
 	browser := NewBrowser(options.BrowseRoots)
 	mux := http.NewServeMux()
-	mux.Handle("/mini-app/api/bootstrap", withViewer(options, func(writer http.ResponseWriter, _ *http.Request, viewer Viewer) {
-		writeJSON(writer, http.StatusOK, buildBootstrap(options.Registry, browser, viewer))
+	mux.Handle("/mini-app/api/bootstrap", withViewer(options, func(writer http.ResponseWriter, request *http.Request, viewer Viewer) {
+		writeJSON(writer, http.StatusOK, buildBootstrap(request.Context(), options.Registry, options.Runtime, browser, viewer))
 	}))
 	mux.Handle("/mini-app/api/project-browse", withViewer(options, func(writer http.ResponseWriter, request *http.Request, _ Viewer) {
 		if request.Method != http.MethodGet {
@@ -50,11 +53,23 @@ func NewHandler(options Options) http.Handler {
 	mux.Handle("/mini-app/api/kill", withViewer(options, commandAction(options, func(commandPayload) string {
 		return "/kill"
 	})))
+	mux.Handle("/mini-app/api/clear", withViewer(options, commandAction(options, func(commandPayload) string {
+		return "/clear"
+	})))
 	mux.Handle("/mini-app/api/project-add", withViewer(options, commandAction(options, func(payload commandPayload) string {
 		return "/project_add " + payload.Name + " " + payload.Root
 	})))
 	mux.Handle("/mini-app/api/project-remove", withViewer(options, commandAction(options, func(payload commandPayload) string {
 		return "/project_remove " + payload.Name
+	})))
+	mux.Handle("/mini-app/api/model", withViewer(options, commandAction(options, func(payload commandPayload) string {
+		return "/model " + payload.Model
+	})))
+	mux.Handle("/mini-app/api/reasoning", withViewer(options, commandAction(options, func(payload commandPayload) string {
+		return "/reasoning " + payload.Reasoning
+	})))
+	mux.Handle("/mini-app/api/plan-mode", withViewer(options, commandAction(options, func(payload commandPayload) string {
+		return "/plan_mode " + payload.Mode
 	})))
 	var staticHandler http.Handler
 	if options.StaticFS != nil {
@@ -98,9 +113,12 @@ func StaticAssetsFromEmbed(assets embed.FS, root string) (fs.FS, error) {
 }
 
 type commandPayload struct {
-	Project string `json:"project"`
-	Name    string `json:"name"`
-	Root    string `json:"root"`
+	Project   string `json:"project"`
+	Name      string `json:"name"`
+	Root      string `json:"root"`
+	Model     string `json:"model"`
+	Reasoning string `json:"reasoning"`
+	Mode      string `json:"mode"`
 }
 
 func commandAction(options Options, buildCommand func(commandPayload) string) func(http.ResponseWriter, *http.Request, Viewer) {
@@ -142,7 +160,7 @@ func withViewer(options Options, next func(http.ResponseWriter, *http.Request, V
 	})
 }
 
-func buildBootstrap(registry *session.Registry, browser *Browser, viewer Viewer) BootstrapResponse {
+func buildBootstrap(ctx context.Context, registry *session.Registry, runtime telegram.SessionRuntime, browser *Browser, viewer Viewer) BootstrapResponse {
 	response := BootstrapResponse{
 		Viewer:            viewer,
 		Sessions:          make([]SessionView, 0),
@@ -154,6 +172,15 @@ func buildBootstrap(registry *session.Registry, browser *Browser, viewer Viewer)
 	if active, ok := registry.Active(); ok {
 		activeView := toSessionView(active)
 		response.ActiveSession = &activeView
+		if runtime != nil {
+			if status, err := runtime.Status(ctx, active); err == nil {
+				statusView := toStatusView(status)
+				response.ActiveStatus = &statusView
+			}
+			if models, err := runtime.ListModels(ctx, active); err == nil {
+				response.Models = toModelViews(models)
+			}
+		}
 	}
 
 	for _, item := range registry.List() {
@@ -170,6 +197,44 @@ func buildBootstrap(registry *session.Registry, browser *Browser, viewer Viewer)
 		})
 	}
 	return response
+}
+
+func toStatusView(status session.Status) StatusView {
+	return StatusView{
+		ThreadID:     status.ThreadID,
+		Cwd:          status.Cwd,
+		Branch:       status.Branch,
+		CodexVersion: status.CodexVersion,
+		Effective: ControlSelectionView{
+			Model:     status.Effective.Model,
+			Reasoning: status.Effective.Reasoning,
+			PlanMode:  string(status.Effective.PlanMode),
+		},
+		Pending: ControlSelectionView{
+			Model:     status.Pending.Model,
+			Reasoning: status.Pending.Reasoning,
+			PlanMode:  string(status.Pending.PlanMode),
+		},
+		TokenUsage: TokenUsageView{
+			ContextWindow: status.TokenUsage.ContextWindow,
+			TotalTokens:   status.TokenUsage.TotalTokens,
+		},
+		HasTokenUsage:       status.HasTokenUsage,
+		LocalWritableAttach: status.LocalWritableAttach,
+	}
+}
+
+func toModelViews(models []appserver.ModelInfo) []ModelView {
+	views := make([]ModelView, 0, len(models))
+	for _, model := range models {
+		views = append(views, ModelView{
+			ID:               model.ID,
+			Model:            model.Model,
+			DefaultReasoning: model.DefaultReasoning,
+			Supported:        append([]string(nil), model.Supported...),
+		})
+	}
+	return views
 }
 
 func toSessionView(item session.View) SessionView {

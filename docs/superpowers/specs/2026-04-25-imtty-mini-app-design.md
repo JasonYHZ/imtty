@@ -14,6 +14,8 @@
 - 查看已知 session 列表
 - 查看可打开项目列表
 - 执行 `open / close / kill`
+- 执行 `clear`
+- 查看并切换当前会话的 model / reasoning / plan mode
 - 执行 `project_add / project_remove`
 
 用户仍然在 Telegram 聊天窗口中：
@@ -42,6 +44,7 @@
 - 添加项目表单
 - 删除动态项目按钮
 - `open / close / kill / project_add / project_remove` 控制动作
+- `clear / model / reasoning / plan_mode` 控制动作
 - Telegram Mini App `initData` 服务端校验
 - owner 白名单控制
 
@@ -71,6 +74,7 @@ Mini App 首页采用单页布局，分 4 个区块。
 动作：
 
 - `关闭当前会话`
+- `清空当前会话上下文`
 - `彻底删除当前会话`
 
 ### 4.2 会话列表
@@ -85,6 +89,22 @@ Mini App 首页采用单页布局，分 4 个区块。
 
 - `打开并切换`
 - 若当前项是 active，则只显示状态，不重复给出 `open`
+
+### 4.2.1 会话设置
+
+显示：
+
+- 当前 model
+- 当前 reasoning
+- 当前 plan mode
+
+动作：
+
+- 切换 model
+- 切换 reasoning
+- 切换 plan mode
+
+所有设置只对当前 active session 生效，并在下一条真实消息时应用。
 
 ### 4.3 项目列表
 
@@ -147,6 +167,10 @@ Mini App 不做多页面路由。
 - `POST /mini-app/api/open`
 - `POST /mini-app/api/close`
 - `POST /mini-app/api/kill`
+- `POST /mini-app/api/clear`
+- `POST /mini-app/api/model`
+- `POST /mini-app/api/reasoning`
+- `POST /mini-app/api/plan-mode`
 - `POST /mini-app/api/project-add`
 - `POST /mini-app/api/project-remove`
 - `GET /mini-app/api/project-browse`
@@ -161,6 +185,8 @@ Mini App 不做多页面路由。
 - `projects`
 - `browse_default_path`
 - `browse_shortcuts`
+- `active_status`
+- `models`
 
 `POST /mini-app/api/open` 请求体：
 
@@ -191,6 +217,24 @@ path=/Users/jasonyu/workspace/demo
 
 ```json
 { "name": "demo" }
+```
+
+`POST /mini-app/api/model` 请求体：
+
+```json
+{ "model": "gpt-5.5" }
+```
+
+`POST /mini-app/api/reasoning` 请求体：
+
+```json
+{ "reasoning": "high" }
+```
+
+`POST /mini-app/api/plan-mode` 请求体：
+
+```json
+{ "mode": "plan" }
 ```
 
 接口动作必须复用现有 bridge 语义，不允许新造一套 session 生命周期。

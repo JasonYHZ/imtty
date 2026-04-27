@@ -384,7 +384,7 @@ hello
 - [Mini App design spec](docs/superpowers/specs/2026-04-25-imtty-mini-app-design.md)
 - [App-server rewrite design](docs/superpowers/specs/2026-04-25-imtty-app-server-rewrite-design.md)
 
-Mini App 前端在 `web/mini-app/`，构建产物在 `web/mini-app/dist/`。Mini App 路由必须使用 `/mini-app/#/...` 这种 hash 模式，Go bridge 直接把 `dist` 当静态目录提供；`npm run build` 后刷新 Mini App 即可读取新文件，不需要因为前端静态文件变化而重启 bridge。
+Mini App 前端在 `web/mini-app/`，构建产物在 `web/mini-app/dist/`。Go bridge 直接把 `dist` 当静态目录提供；`npm run build` 后刷新 Mini App 即可读取新文件，不需要因为前端静态文件变化而重启 bridge。当前 Mini App 是纯静态前端构建，运行时通过 `/mini-app/api/*` 调用 bridge。
 
 ## License
 

@@ -33,9 +33,41 @@ export interface BrowseResponse {
   shortcuts: BrowseShortcutView[]
 }
 
+export interface StatusView {
+  thread_id?: string
+  cwd?: string
+  branch?: string
+  codex_version?: string
+  effective: {
+    model?: string
+    reasoning?: string
+    plan_mode?: string
+  }
+  pending: {
+    model?: string
+    reasoning?: string
+    plan_mode?: string
+  }
+  token_usage: {
+    context_window: number
+    total_tokens: number
+  }
+  has_token_usage: boolean
+  local_writable_attach: boolean
+}
+
+export interface ModelView {
+  id: string
+  model: string
+  default_reasoning: string
+  supported: string[]
+}
+
 export interface BootstrapResponse {
   viewer: Viewer
   active_session?: SessionView
+  active_status?: StatusView
+  models?: ModelView[]
   sessions: SessionView[]
   projects: ProjectView[]
   browse_default_path: string

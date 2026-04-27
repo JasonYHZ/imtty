@@ -240,6 +240,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 7. 这些动作必须复用现有 bridge 语义，而不是重新实现一套 session 生命周期。
 8. Mini App 前端路由必须使用 hash 模式，例如 `/mini-app/#/sessions`；Go bridge 只负责提供 `/mini-app/` 下的静态构建产物和 `/mini-app/api/*`。
 9. `web/mini-app/dist/` 必须作为静态目录直接提供；`npm run build` 后，新请求应从磁盘读取最新 `index.html` 与 asset 文件，不要求重启 bridge。
+10. Mini App 是纯静态前端构建，运行时只能调用 bridge 暴露的 `/mini-app/api/*`，不能引入独立前端服务。
 
 ### 5.3 `/close`
 

@@ -33,6 +33,8 @@ type DirectoryEntryView struct {
 type BootstrapResponse struct {
 	Viewer            Viewer               `json:"viewer"`
 	ActiveSession     *SessionView         `json:"active_session,omitempty"`
+	ActiveStatus      *StatusView          `json:"active_status,omitempty"`
+	Models            []ModelView          `json:"models,omitempty"`
 	Sessions          []SessionView        `json:"sessions"`
 	Projects          []ProjectView        `json:"projects"`
 	BrowseDefaultPath string               `json:"browse_default_path"`
@@ -49,4 +51,34 @@ type BrowseResponse struct {
 	ParentAbsolutePath  string               `json:"parent_absolute_path,omitempty"`
 	Directories         []DirectoryEntryView `json:"directories"`
 	Shortcuts           []BrowseShortcutView `json:"shortcuts"`
+}
+
+type ControlSelectionView struct {
+	Model     string `json:"model,omitempty"`
+	Reasoning string `json:"reasoning,omitempty"`
+	PlanMode  string `json:"plan_mode,omitempty"`
+}
+
+type TokenUsageView struct {
+	ContextWindow int64 `json:"context_window"`
+	TotalTokens   int64 `json:"total_tokens"`
+}
+
+type StatusView struct {
+	ThreadID            string               `json:"thread_id,omitempty"`
+	Cwd                 string               `json:"cwd,omitempty"`
+	Branch              string               `json:"branch,omitempty"`
+	CodexVersion        string               `json:"codex_version,omitempty"`
+	Effective           ControlSelectionView `json:"effective"`
+	Pending             ControlSelectionView `json:"pending"`
+	TokenUsage          TokenUsageView       `json:"token_usage"`
+	HasTokenUsage       bool                 `json:"has_token_usage"`
+	LocalWritableAttach bool                 `json:"local_writable_attach"`
+}
+
+type ModelView struct {
+	ID               string   `json:"id"`
+	Model            string   `json:"model"`
+	DefaultReasoning string   `json:"default_reasoning"`
+	Supported        []string `json:"supported"`
 }

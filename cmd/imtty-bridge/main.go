@@ -67,6 +67,7 @@ func main() {
 			OwnerID:     cfg.TelegramOwnerID,
 			Registry:    registry,
 			Adapter:     adapter,
+			Runtime:     runtime,
 			BrowseRoots: cfg.ProjectBrowseRoots,
 			StaticFS:    miniAppFS,
 		}),
