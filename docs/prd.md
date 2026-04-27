@@ -19,9 +19,11 @@
 - 不做 Agent 编排、任务拆解、自主调度、自主重试。
 - 不做多用户权限系统、团队共享或协作审计。
 - 不做 Web UI、控制台后台、独立 dashboard。
-- 不做通用文件上传、语音、富卡片或复杂多模态交互。
+- 不做通用文件上传、富卡片或复杂多模态交互。
 - 允许最小图片输入支持：Telegram `photo` 和图片型 `document` 作为单张临时图片输入进入 Codex。
 - 允许最小文件分析支持：Telegram 文本/代码类 `document` 和 `PDF document` 作为临时文件输入进入 Codex。
+- 允许最小语音输入支持：Telegram `voice` 下载到临时目录，经本地转写为文本后按普通文本进入 Codex。
+- 不做语音命令、语音审批、长音频任务、说话人识别、多段合并或长期语音保存。
 - 不做对 Codex 协议的再包装或替代，不屏蔽 Codex 的原生审批流程。
 
 ## 4. 核心原则
@@ -60,6 +62,14 @@
 3. bridge 通过 Codex app-server 接收结构化事件。
 4. 只有最终回复、审批请求和必要状态会被格式化并发回 Telegram。
 
+### 6.2.1 语音输入
+
+1. 用户发送一条 Telegram voice。
+2. Bridge 下载语音到本机临时目录。
+3. Bridge 调用本地语音转写器生成文本。
+4. 转写文本按普通文本输入当前 active session。
+5. 如果未配置转写器、转写失败或当前会话被本地终端占用，Telegram 必须返回明确状态提示和下一步动作。
+
 ### 6.3 审批交互
 
 1. Codex 输出中出现 `y/n`、`Yes/No` 等审批提示。
@@ -94,19 +104,19 @@ MVP 只定义以下 bot 命令：
 - `/reasoning [effort]`: 查看或设置当前 active session 的待生效 reasoning。
 - `/plan_mode [default|plan]`: 查看或设置当前 active session 的待生效 plan 预设。
 
-MVP 对外输入模型只允许五类：
+MVP 对外输入模型只允许六类：
 
 - bot command
 - plain text
 - quick reply approval
 - single image message
 - single file message
+- single voice message
 
 MVP 不定义：
 
 - `/restart` bot 命令
 - 任意文件上传
-- 语音消息
 - 富卡片式交互
 - 独立 Web 控制台
 
@@ -151,6 +161,10 @@ MVP 不定义：
 
 `Telegram document -> getFile/download -> temp file -> 文本读取或 PDF 文本提取 -> app-server text -> Codex`
 
+语音输入补充链路：
+
+`Telegram voice -> getFile/download -> temp audio file -> ffmpeg WAV 转换 -> whisper.cpp 本地转写 -> app-server text -> Codex`
+
 ### 9.2 输出链路
 
 `Codex app-server events -> output formatter -> chunker -> Telegram sender`
@@ -173,6 +187,7 @@ MVP 不定义：
 - 当本地终端仅存在只读 spectator client 时，Telegram 仍允许继续远程写入该会话。
 - 图片只允许作为临时文件落地，不写入项目目录，也不长期保存。
 - 文本/代码文件与 PDF 只允许作为临时文件落地，不写入项目目录，也不长期保存。
+- 语音只允许作为临时文件落地，不写入项目目录，也不长期保存。
 
 ## 10. 异常处理
 
@@ -209,6 +224,7 @@ MVP 必须包含：
 - 普通文本透传
 - 单张图片输入透传
 - 文本/代码文件与 PDF 的临时文件输入透传
+- Telegram voice 的本地转写文本输入透传
 - Codex app-server 连接、thread start-resume、turn start
 - 结构化最终回复分片与节流
 - 结构化审批请求与 `Yes/No` 快捷回复映射
@@ -220,6 +236,7 @@ MVP 明确不包含：
 - 多用户账号体系
 - Web 管理面板
 - 任意文件上传和扫描版 PDF OCR
+- 语音命令、语音审批、长音频任务、说话人识别和多段合并
 - 后台任务编排
 
 ## 13. 后续范围
@@ -251,6 +268,7 @@ MVP 明确不包含：
 13. 当桌面端已经 attach 到同一 tmux session 时，Telegram 普通文本、审批回复和 `/kill` 都会被拒绝，并得到明确下一步动作提示。
 14. Telegram `photo` 和图片型 `document` 能以单张临时图片输入进入当前 active session。
 15. Telegram 文本/代码类 `document` 和 `PDF document` 能以临时文件分析输入进入当前 active session。
-16. 不支持的二进制 `document` 会被明确拒绝。
-17. `/model`、`/reasoning`、`/plan_mode` 能更新当前 active session 的 pending 控制状态，并在下一条真实消息时生效。
-18. `/status` 能输出当前 active session 的 model、reasoning、plan mode、thread id、cwd、branch 以及最佳努力窗口统计。
+16. 已配置本地转写器时，Telegram `voice` 会被转写为文本并进入当前 active session；未配置、下载失败、转写失败或空转写结果都会返回明确状态提示。
+17. 不支持的二进制 `document` 会被明确拒绝。
+18. `/model`、`/reasoning`、`/plan_mode` 能更新当前 active session 的 pending 控制状态，并在下一条真实消息时生效。
+19. `/status` 能输出当前 active session 的 model、reasoning、plan mode、thread id、cwd、branch 以及最佳努力窗口统计。

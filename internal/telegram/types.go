@@ -13,6 +13,7 @@ type Message struct {
 	Caption   string      `json:"caption,omitempty"`
 	Photo     []PhotoSize `json:"photo,omitempty"`
 	Document  *Document   `json:"document,omitempty"`
+	Voice     *Voice      `json:"voice,omitempty"`
 }
 
 type Chat struct {
@@ -38,4 +39,12 @@ type Document struct {
 	FileName     string `json:"file_name,omitempty"`
 	MimeType     string `json:"mime_type,omitempty"`
 	FileSize     int64  `json:"file_size,omitempty"`
+}
+
+type Voice struct {
+	FileID       string `json:"file_id"`
+	FileUniqueID string `json:"file_unique_id,omitempty"`
+	MimeType     string `json:"mime_type,omitempty"`
+	FileSize     int64  `json:"file_size,omitempty"`
+	Duration     int    `json:"duration,omitempty"`
 }

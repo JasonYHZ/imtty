@@ -23,7 +23,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 
 - 验证 webhook secret。
 - 解析 Telegram update。
-- 区分 bot command、plain text、quick reply approval、single image message、single file message。
+- 区分 bot command、plain text、quick reply approval、single image message、single file message、single voice message。
 - 把输入转成内部命令或文本事件。
 
 边界：
@@ -79,6 +79,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 - 将用户普通文本转换成 app-server `turn/start`。
 - 将用户图片消息转换成 `localImage` + 可选 caption 的 app-server 输入。
 - 将用户文本/代码文件或 PDF 转换成内容提取后的 app-server 文本输入。
+- 将用户语音消息转换成本地转写后的 app-server 文本输入。
 - 当存在挂起审批时，将 `Yes/No` 快捷回复转换成结构化 approval response。
 
 边界：
@@ -127,6 +128,11 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 - `IMTTY_PROJECT_STORE_PATH`: 动态项目白名单持久化文件路径；默认 `.imtty-projects.json`。
 - `IMTTY_TELEGRAM_OWNER_ID`: Mini App 允许访问的 Telegram owner id。
 - `IMTTY_MINI_APP_BASE_URL`: 用于生成 Mini App `Menu Button` 的公开基础地址。
+- `IMTTY_VOICE_ENABLED`: 是否启用 Telegram voice 本地转写。
+- `IMTTY_VOICE_FFMPEG_BIN`: `ffmpeg` 可执行文件路径，默认 `ffmpeg`。
+- `IMTTY_VOICE_WHISPER_BIN`: `whisper.cpp` 的 `whisper-cli` 可执行文件路径，默认 `whisper-cli`。
+- `IMTTY_VOICE_MODEL_PATH`: whisper.cpp GGML 模型路径；启用 voice 时必填。
+- `IMTTY_VOICE_LANGUAGE`: 转写语言，默认 `zh`。
 - `project_browse_roots`: `config.toml` 中的额外快捷目录入口集合，用于 Mini App 的目录选择器。
 
 默认加载策略：
@@ -186,8 +192,9 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 4. 否则 App-server runtime 向对应 thread 发出 `turn/start`。
 5. App-server 事件流返回 `final_answer` 或审批请求。
 6. Output formatter 分片、节流后发回 Telegram。
+7. 如果事件流返回 turn 错误或 app-server 连接断开，bridge 必须停止 Telegram typing 并发出状态提示，不能让聊天窗口一直停留在“正在输入”。
 
-### 5.2.3 `/model`、`/reasoning`、`/plan_mode`
+### 5.2.1 `/model`、`/reasoning`、`/plan_mode`
 
 1. Telegram webhook adapter 校验当前存在 active session。
 2. 读取当前 session 的 bridge 控制状态与 app-server 线程状态。
@@ -197,7 +204,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 6. 命令只更新当前 session 的 pending 控制状态，不会伪造空 turn。
 7. 下一条真实用户输入进入 `turn/start` 时，pending model / effort 一并覆盖到底层会话，并提升为 effective 状态。
 
-### 5.2.1 图片消息
+### 5.2.2 图片消息
 
 1. Telegram webhook adapter 识别 `photo` 或图片型 `document`。
 2. 通过 Telegram `getFile` 获取 `file_path`。
@@ -214,8 +221,19 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 - 当 turn 已提交给 Codex 且仍在处理中时，bridge 会周期性发送 Telegram `typing` chat action，直到最终回复或审批提示出现。
 - 本地 attach 时，普通文本与审批回复直接拒绝，不进入远程 turn。
 - 图片只允许写入 bridge 主机临时目录，不长期保存，也不复制进项目目录。
+- 语音只允许写入 bridge 主机临时目录，不长期保存，也不复制进项目目录；转写文本按普通文本进入 Codex。
 
-### 5.2.2 文件消息
+### 5.2.3 语音消息
+
+1. Telegram webhook adapter 识别 `voice`。
+2. 通过 Telegram `getFile` 获取 `file_path`。
+3. 下载原始 voice 到 bridge 主机临时目录。
+4. Bridge 调用本地转写器生成文本。
+5. 转写文本与可选 caption 组合成 app-server `text` 输入。
+6. 未配置转写器、下载失败、转写失败或空转写结果都必须返回明确状态提示。
+7. 第一版不做语音命令、语音审批、长音频任务、说话人识别或多段合并。
+
+### 5.2.4 文件消息
 
 1. Telegram webhook adapter 识别文本/代码类 `document` 或 `PDF document`。
 2. 通过 Telegram `getFile` 获取 `file_path`。
@@ -229,7 +247,7 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 - 文本/代码文件与 PDF 只允许写入 bridge 主机临时目录，不长期保存，也不复制进项目目录。
 - 第一版不做扫描版 PDF OCR，只处理可直接提取文本的 PDF。
 
-### 5.2.1 Mini App 控制动作
+### 5.2.5 Mini App 控制动作
 
 1. Telegram 内部通过 `Menu Button` 打开 Mini App。
 2. 前端携带 `initData` 请求 `GET /mini-app/api/bootstrap`。

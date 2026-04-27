@@ -37,6 +37,10 @@ func (s *Store) SaveDocument(sessionName string, fileID string, extension string
 	return s.save(sessionName, fileID, extension, body)
 }
 
+func (s *Store) SaveVoice(sessionName string, fileID string, extension string, body io.Reader) (string, error) {
+	return s.save(sessionName, fileID, extension, body)
+}
+
 func (s *Store) save(sessionName string, fileID string, extension string, body io.Reader) (string, error) {
 	if err := s.cleanupExpired(); err != nil {
 		return "", err

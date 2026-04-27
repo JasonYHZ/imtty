@@ -9,6 +9,8 @@ const (
 	EventApprovalRequested EventKind = "approval_requested"
 	EventTokenUsageUpdated EventKind = "token_usage_updated"
 	EventModelRerouted     EventKind = "model_rerouted"
+	EventTurnError         EventKind = "turn_error"
+	EventConnectionClosed  EventKind = "connection_closed"
 )
 
 type Event struct {

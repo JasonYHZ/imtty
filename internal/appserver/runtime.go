@@ -513,6 +513,27 @@ func (r *Runtime) sendEvent(live *liveSession, event Event) {
 				QuickReplies: message.QuickReplies,
 			})
 		}
+	case EventTurnError:
+		text := strings.TrimSpace(event.Text)
+		if text == "" {
+			text = "Codex 会话异常中断"
+		}
+		r.sendSystemMessage(live, "Codex 会话异常中断：\n"+text+"\n\n下一步：可以直接发送补充说明继续；如果持续失败，请执行 /clear 或 /kill 后重新 /open。")
+	case EventConnectionClosed:
+		text := strings.TrimSpace(event.Text)
+		if text == "" {
+			text = "Codex app-server 连接已断开"
+		}
+		r.sendSystemMessage(live, text+"\n下一步：请执行 /open <project> 重新接管，或 /status 查看当前状态。")
+	}
+}
+
+func (r *Runtime) sendSystemMessage(live *liveSession, text string) {
+	for _, message := range r.formatter.FormatTelegramHTML(text) {
+		if strings.TrimSpace(message.Text) == "" {
+			continue
+		}
+		_ = r.sender.SendMessage(context.Background(), live.chatID, message)
 	}
 }
 

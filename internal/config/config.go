@@ -36,6 +36,15 @@ type Config struct {
 	PlanModeReasoning     string
 	MessageChunkBytes     int
 	FlushInterval         time.Duration
+	Voice                 VoiceConfig
+}
+
+type VoiceConfig struct {
+	Enabled    bool
+	FFmpegBin  string
+	WhisperBin string
+	ModelPath  string
+	Language   string
 }
 
 type fileConfig struct {
@@ -52,6 +61,15 @@ type fileConfig struct {
 	PlanModeReasoning     string            `toml:"plan_mode_reasoning_effort"`
 	MessageChunkBytes     int               `toml:"message_chunk_bytes"`
 	FlushIntervalMS       int               `toml:"flush_interval_ms"`
+	Voice                 voiceFileConfig   `toml:"voice"`
+}
+
+type voiceFileConfig struct {
+	Enabled    bool   `toml:"enabled"`
+	FFmpegBin  string `toml:"ffmpeg_bin"`
+	WhisperBin string `toml:"whisper_bin"`
+	ModelPath  string `toml:"model_path"`
+	Language   string `toml:"language"`
 }
 
 func Load(configPath string) (Config, error) {
@@ -87,6 +105,11 @@ func load(configPath string, getenv func(string) string, getwd func() (string, e
 		PlanModeReasoning: defaultPlanModeReasoning,
 		MessageChunkBytes: defaultMessageChunkSize,
 		FlushInterval:     defaultFlushInterval,
+		Voice: VoiceConfig{
+			FFmpegBin:  "ffmpeg",
+			WhisperBin: "whisper-cli",
+			Language:   "zh",
+		},
 	}
 
 	if fileCfg != nil {
@@ -128,6 +151,21 @@ func load(configPath string, getenv func(string) string, getwd func() (string, e
 		}
 		if fileCfg.FlushIntervalMS > 0 {
 			cfg.FlushInterval = time.Duration(fileCfg.FlushIntervalMS) * time.Millisecond
+		}
+		if fileCfg.Voice.Enabled {
+			cfg.Voice.Enabled = true
+		}
+		if raw := strings.TrimSpace(fileCfg.Voice.FFmpegBin); raw != "" {
+			cfg.Voice.FFmpegBin = raw
+		}
+		if raw := strings.TrimSpace(fileCfg.Voice.WhisperBin); raw != "" {
+			cfg.Voice.WhisperBin = raw
+		}
+		if raw := strings.TrimSpace(fileCfg.Voice.ModelPath); raw != "" {
+			cfg.Voice.ModelPath = resolvePath(fileDir, raw)
+		}
+		if raw := strings.TrimSpace(fileCfg.Voice.Language); raw != "" {
+			cfg.Voice.Language = raw
 		}
 	}
 
@@ -187,6 +225,25 @@ func load(configPath string, getenv func(string) string, getwd func() (string, e
 		}
 		cfg.FlushInterval = time.Duration(value) * time.Millisecond
 	}
+	if raw := strings.TrimSpace(getenv("IMTTY_VOICE_ENABLED")); raw != "" {
+		value, err := strconv.ParseBool(raw)
+		if err != nil {
+			return Config{}, fmt.Errorf("IMTTY_VOICE_ENABLED must be a boolean")
+		}
+		cfg.Voice.Enabled = value
+	}
+	if raw := strings.TrimSpace(getenv("IMTTY_VOICE_FFMPEG_BIN")); raw != "" {
+		cfg.Voice.FFmpegBin = raw
+	}
+	if raw := strings.TrimSpace(getenv("IMTTY_VOICE_WHISPER_BIN")); raw != "" {
+		cfg.Voice.WhisperBin = raw
+	}
+	if raw := strings.TrimSpace(getenv("IMTTY_VOICE_MODEL_PATH")); raw != "" {
+		cfg.Voice.ModelPath = resolvePath(cwd, raw)
+	}
+	if raw := strings.TrimSpace(getenv("IMTTY_VOICE_LANGUAGE")); raw != "" {
+		cfg.Voice.Language = raw
+	}
 
 	if cfg.TelegramBotToken == "" {
 		return Config{}, errors.New("IMTTY_TELEGRAM_BOT_TOKEN is required")
@@ -202,6 +259,9 @@ func load(configPath string, getenv func(string) string, getwd func() (string, e
 	}
 	if err := validateProjectRoots(cfg.ProjectBrowseRoots); err != nil {
 		return Config{}, err
+	}
+	if cfg.Voice.Enabled && strings.TrimSpace(cfg.Voice.ModelPath) == "" {
+		return Config{}, errors.New("voice model_path or IMTTY_VOICE_MODEL_PATH is required when voice is enabled")
 	}
 
 	return cfg, nil

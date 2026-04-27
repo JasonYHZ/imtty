@@ -1,6 +1,6 @@
 listen = ":8080"
-telegram_bot_token = "replace-with-bot-token"
-telegram_webhook_secret = "replace-with-webhook-secret"
+telegram_bot_token = "BOT_TOKEN"
+telegram_webhook_secret = "SECRET"
 telegram_owner_id = 123456789
 mini_app_base_url = "https://imtty.example.com"
 project_store_path = ".imtty-projects.json"
@@ -9,6 +9,13 @@ codex_bin = "codex"
 plan_mode_reasoning_effort = "xhigh"
 message_chunk_bytes = 3500
 flush_interval_ms = 500
+
+[voice]
+enabled = false
+ffmpeg_bin = "ffmpeg"
+whisper_bin = "/absolute/path/to/whisper.cpp/build/bin/whisper-cli"
+model_path = "/absolute/path/to/whisper.cpp/models/ggml-large-v3-turbo.bin"
+language = "zh"
 
 [projects]
 demo = "/absolute/path/to/your/project"

@@ -56,6 +56,7 @@ Telegram 默认只消费这几类结构化事件：
 
 - `agentMessage` 且 `phase == final_answer`
 - 审批请求
+- turn 错误或 app-server 连接断开提示
 - 必要状态提示
 
 Telegram 默认不再消费：
@@ -144,9 +145,10 @@ Adapter 改为依赖“会话运行时”而不是 `OutputPump`：
 
 - app-server 连接失败：提示“会话未就绪，请稍后重试或重新 /open <project>”
 - `thread/resume` 失败：回退到 `thread/start`
+- turn 运行中断：停止 Telegram typing，并把 app-server 错误文本作为状态提示发回 Telegram。
 - 审批请求悬挂期间收到无关普通文本：提示“当前等待审批，请先回复 是/否”
 - 本地 attach 冲突：提示“本地占用中，请先在桌面端 detach 后再继续远程操作”
-- app-server 进程退出但 tmux 仍存在：状态置为 `lost`，提示重新 `/open <project>`
+- app-server 连接断开但 tmux 仍存在：停止 Telegram typing，提示重新 `/open <project>` 或 `/status` 查看状态。
 
 ## Acceptance criteria
 

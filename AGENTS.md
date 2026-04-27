@@ -11,9 +11,10 @@
 - 不实现 Agent 编排、任务拆解、自主调度、自主重试策略。
 - 不实现独立 Web 面板、后台管理界面或额外运维面板。
 - 不实现复杂权限系统、角色系统或共享工作空间模型。
-- 不定义通用文件上传、语音、富卡片、批量任务控制。
+- 不定义通用文件上传、富卡片、批量任务控制。
 - 允许最小图片输入支持：Telegram `photo` 与图片型 `document` 可以作为单张临时图片输入进入 Codex。
 - 允许最小文件分析支持：Telegram 文本/代码类 `document` 与 `PDF document` 可以作为临时文件输入进入 Codex。
+- 允许最小语音输入支持：Telegram `voice` 可以作为单条临时音频转写为文本，再进入当前 active session；不做语音命令、语音审批或长期音频保存。
 - 不改写 Codex 的审批协议；必须保留 Codex 原生 REPL/approval 流。
 
 ## 默认实现边界
@@ -26,6 +27,7 @@
 - 普通文本消息默认透传到当前 active session。
 - 单张图片消息允许通过临时文件 + `localImage` 进入当前 active session。
 - 文本/代码文件与 PDF 允许通过临时文件 + 内容提取进入当前 active session。
+- 单条语音消息允许通过临时文件 + 本地转写进入当前 active session，转写后的文字按普通文本处理。
 - `Yes/No` 快捷回复只是便捷层，最终仍要回注为文本输入。
 - 单个 IM 会话在任一时刻只能绑定一个 active session；允许存在多个 project session。
 - Mini App 只做结构化控制，不替代聊天窗口中的 stdout、普通文本输入或审批流。
@@ -68,3 +70,4 @@
 - 不要为了方便调试破坏 Telegram-first 的公开接口定义。
 - 不要把 Telegram 图片长期保存到项目目录或仓库目录。
 - 不要把 Telegram 文件长期保存到项目目录或仓库目录。
+- 不要把 Telegram 语音长期保存到项目目录或仓库目录。

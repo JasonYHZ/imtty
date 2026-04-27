@@ -109,6 +109,38 @@ func TestLoadParsesMiniAppConfig(t *testing.T) {
 	}
 }
 
+func TestLoadParsesVoiceConfigFromEnv(t *testing.T) {
+	t.Setenv("IMTTY_TELEGRAM_BOT_TOKEN", "bot-token")
+	t.Setenv("IMTTY_TELEGRAM_WEBHOOK_SECRET", "secret-token")
+	t.Setenv("IMTTY_PROJECT_ROOTS", "project-a=/tmp/project-a")
+	t.Setenv("IMTTY_VOICE_ENABLED", "true")
+	t.Setenv("IMTTY_VOICE_FFMPEG_BIN", "/opt/homebrew/bin/ffmpeg")
+	t.Setenv("IMTTY_VOICE_WHISPER_BIN", "/opt/whisper.cpp/build/bin/whisper-cli")
+	t.Setenv("IMTTY_VOICE_MODEL_PATH", "/opt/whisper.cpp/models/ggml-large-v3-turbo.bin")
+	t.Setenv("IMTTY_VOICE_LANGUAGE", "zh")
+
+	cfg, err := LoadFromEnv()
+	if err != nil {
+		t.Fatalf("LoadFromEnv() error = %v", err)
+	}
+
+	if !cfg.Voice.Enabled {
+		t.Fatal("Voice.Enabled = false, want true")
+	}
+	if got := cfg.Voice.FFmpegBin; got != "/opt/homebrew/bin/ffmpeg" {
+		t.Fatalf("Voice.FFmpegBin = %q, want configured ffmpeg", got)
+	}
+	if got := cfg.Voice.WhisperBin; got != "/opt/whisper.cpp/build/bin/whisper-cli" {
+		t.Fatalf("Voice.WhisperBin = %q, want configured whisper", got)
+	}
+	if got := cfg.Voice.ModelPath; got != "/opt/whisper.cpp/models/ggml-large-v3-turbo.bin" {
+		t.Fatalf("Voice.ModelPath = %q, want configured model", got)
+	}
+	if got := cfg.Voice.Language; got != "zh" {
+		t.Fatalf("Voice.Language = %q, want zh", got)
+	}
+}
+
 func TestLoadRejectsInvalidOwnerID(t *testing.T) {
 	t.Setenv("IMTTY_TELEGRAM_BOT_TOKEN", "bot-token")
 	t.Setenv("IMTTY_TELEGRAM_WEBHOOK_SECRET", "secret-token")
@@ -127,7 +159,7 @@ func TestLoadParsesConfigTomlAndDefaults(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(`
 listen = ":9090"
 telegram_bot_token = "bot-token"
-telegram_webhook_secret = "secret-token"
+telegram_webhook_secret = "secret"
 telegram_owner_id = 42
 mini_app_base_url = "https://imtty.example.com"
 project_store_path = "state/projects.json"

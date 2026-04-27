@@ -213,7 +213,7 @@ func TestWebhookHandlerControlCommandsAndStatus(t *testing.T) {
 					Reasoning: "xhigh",
 					PlanMode:  session.PlanModePlan,
 				},
-				Cwd:                 "/Users/jasonyu/workspace/Personal/imtty",
+				Cwd:                 "/workspace/imtty",
 				Branch:              "main",
 				CodexVersion:        "0.125.0",
 				ThreadID:            "thread-123",
@@ -605,6 +605,47 @@ func TestWebhookHandlerPDFDocumentSubmitsExtractedTextTurn(t *testing.T) {
 	}
 }
 
+func TestWebhookHandlerVoiceMessageSubmitsTranscribedTextTurn(t *testing.T) {
+	runtime := &fakeSessionRuntime{}
+	fileClient := &fakeFileClient{
+		files: map[string]TelegramFile{
+			"voice-1": {FileID: "voice-1", FilePath: "voice/file_1.oga"},
+		},
+		content: map[string]string{
+			"voice/file_1.oga": "opus-bytes",
+		},
+	}
+	mediaStore := &fakeMediaStore{path: "/tmp/imtty-media/codex-project-a/voice-1.oga"}
+	transcriber := &fakeVoiceTranscriber{text: "帮我检查 Mini App 当前会话状态"}
+	adapter := NewAdapter(session.NewRegistry(map[string]string{
+		"project-a": "/tmp/project-a",
+	}), runtime, &fakeProjectStore{}, fileClient, mediaStore, nil)
+	adapter.SetVoiceTranscriber(transcriber)
+	handler := NewWebhookHandler("secret-token", adapter, &fakeReplySender{}, log.New(io.Discard, "", 0))
+
+	sendTelegramUpdate(t, handler, "secret-token", `/open project-a`)
+	response := sendTelegramVoiceUpdateAllowEmpty(t, handler, "secret-token", Voice{
+		FileID:   "voice-1",
+		MimeType: "audio/ogg",
+		Duration: 8,
+		FileSize: 2048,
+	}, "这段语音是我的需求")
+	if len(response.Responses) != 0 {
+		t.Fatalf("response = %#v, want no immediate ack", response.Responses)
+	}
+	if mediaStore.savedExtension != ".oga" {
+		t.Fatalf("savedExtension = %q, want .oga", mediaStore.savedExtension)
+	}
+	if len(transcriber.calls) != 1 || transcriber.calls[0].path != "/tmp/imtty-media/codex-project-a/voice-1.oga" {
+		t.Fatalf("calls = %#v, want saved voice path", transcriber.calls)
+	}
+	if got := runtime.submitted["codex-project-a"]; len(got) != 1 ||
+		!strings.Contains(got[0], "这段语音是我的需求") ||
+		!strings.Contains(got[0], "帮我检查 Mini App 当前会话状态") {
+		t.Fatalf("submitted = %#v, want caption and transcribed text", runtime.submitted)
+	}
+}
+
 func TestWebhookHandlerRejectsNonImageDocument(t *testing.T) {
 	runtime := &fakeSessionRuntime{}
 	adapter := NewAdapter(session.NewRegistry(map[string]string{
@@ -976,6 +1017,10 @@ func (f *fakeMediaStore) SaveDocument(sessionName string, fileID string, extensi
 	return f.SaveImage(sessionName, fileID, extension, body)
 }
 
+func (f *fakeMediaStore) SaveVoice(sessionName string, fileID string, extension string, body io.Reader) (string, error) {
+	return f.SaveImage(sessionName, fileID, extension, body)
+}
+
 type fakeDocumentAnalyzer struct {
 	text  string
 	err   error
@@ -1002,6 +1047,25 @@ func (f *fakeDocumentAnalyzer) BuildTurnText(_ context.Context, path string, fil
 	return f.text, nil
 }
 
+type fakeVoiceTranscriber struct {
+	text  string
+	err   error
+	calls []voiceTranscriberCall
+}
+
+type voiceTranscriberCall struct {
+	path     string
+	mimeType string
+}
+
+func (f *fakeVoiceTranscriber) BuildTurnText(_ context.Context, path string, mimeType string) (string, error) {
+	f.calls = append(f.calls, voiceTranscriberCall{path: path, mimeType: mimeType})
+	if f.err != nil {
+		return "", f.err
+	}
+	return f.text, nil
+}
+
 func sendTelegramPhotoUpdateAllowEmpty(t *testing.T, handler http.Handler, secret string, photos []PhotoSize, caption string) handlerResponse {
 	t.Helper()
 	return sendTelegramMessage(t, handler, secret, Message{
@@ -1010,6 +1074,17 @@ func sendTelegramPhotoUpdateAllowEmpty(t *testing.T, handler http.Handler, secre
 		From:      &User{ID: 7, Username: "tester"},
 		Caption:   caption,
 		Photo:     photos,
+	})
+}
+
+func sendTelegramVoiceUpdateAllowEmpty(t *testing.T, handler http.Handler, secret string, voice Voice, caption string) handlerResponse {
+	t.Helper()
+	return sendTelegramMessage(t, handler, secret, Message{
+		MessageID: 1,
+		Chat:      Chat{ID: 42},
+		From:      &User{ID: 7, Username: "tester"},
+		Caption:   caption,
+		Voice:     &voice,
 	})
 }
 

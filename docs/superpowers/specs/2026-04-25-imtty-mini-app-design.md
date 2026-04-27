@@ -214,7 +214,7 @@ Mini App 不做多页面路由。
 `GET /mini-app/api/project-browse` 查询参数：
 
 ```text
-path=/Users/jasonyu/workspace/demo
+path=/workspace/demo
 ```
 
 返回：

@@ -21,6 +21,7 @@ type Adapter struct {
 	fileClient   FileClient
 	mediaStore   MediaStore
 	documenter   DocumentAnalyzer
+	voice        VoiceTranscriber
 }
 
 type SessionRuntime interface {
@@ -53,10 +54,15 @@ type FileClient interface {
 type MediaStore interface {
 	SaveImage(sessionName string, fileID string, extension string, body io.Reader) (string, error)
 	SaveDocument(sessionName string, fileID string, extension string, body io.Reader) (string, error)
+	SaveVoice(sessionName string, fileID string, extension string, body io.Reader) (string, error)
 }
 
 type DocumentAnalyzer interface {
 	BuildTurnText(ctx context.Context, path string, fileName string, mimeType string, caption string) (string, error)
+}
+
+type VoiceTranscriber interface {
+	BuildTurnText(ctx context.Context, path string, mimeType string) (string, error)
 }
 
 func NewAdapter(registry *session.Registry, runtime SessionRuntime, projectStore ProjectStore, fileClient FileClient, mediaStore MediaStore, documenter DocumentAnalyzer) *Adapter {
@@ -68,6 +74,10 @@ func NewAdapter(registry *session.Registry, runtime SessionRuntime, projectStore
 		mediaStore:   mediaStore,
 		documenter:   documenter,
 	}
+}
+
+func (a *Adapter) SetVoiceTranscriber(transcriber VoiceTranscriber) {
+	a.voice = transcriber
 }
 
 func (a *Adapter) HandleUpdate(ctx context.Context, update Update) []string {
@@ -128,6 +138,7 @@ type attachmentKind string
 const (
 	attachmentImage    attachmentKind = "image"
 	attachmentDocument attachmentKind = "document"
+	attachmentVoice    attachmentKind = "voice"
 )
 
 type attachmentReference struct {
@@ -207,6 +218,23 @@ func (a *Adapter) handleAttachmentMessage(ctx context.Context, attachment attach
 			_, _ = a.registry.SetState(active.Project, session.StateLost)
 			return []string{fmt.Sprintf("发送文件到会话 %s 失败：%v", active.Name, err)}
 		}
+	case attachmentVoice:
+		if a.voice == nil {
+			return []string{"语音转写当前未配置，请先配置本地 whisper.cpp 转写器"}
+		}
+		voicePath, err := a.mediaStore.SaveVoice(active.Name, attachment.fileID, chooseVoiceExtension(attachment.extension, file.FilePath), body)
+		if err != nil {
+			return []string{fmt.Sprintf("保存临时语音失败：%v", err)}
+		}
+		turnText, err := a.voice.BuildTurnText(ctx, voicePath, attachment.mimeType)
+		if err != nil {
+			return []string{fmt.Sprintf("语音转写失败：%v", err)}
+		}
+		turnText = prependCaption(attachment.caption, turnText)
+		if err := a.runtime.SubmitText(ctx, chatIDFromContext(ctx), active, turnText); err != nil {
+			_, _ = a.registry.SetState(active.Project, session.StateLost)
+			return []string{fmt.Sprintf("发送语音转写到会话 %s 失败：%v", active.Name, err)}
+		}
 	}
 	return nil
 }
@@ -222,6 +250,15 @@ func (a *Adapter) parseAttachment(message *Message) (attachmentReference, bool, 
 			fileID:    photo.FileID,
 			caption:   strings.TrimSpace(message.Caption),
 			extension: ".jpg",
+		}, true, nil
+	}
+	if message.Voice != nil {
+		return attachmentReference{
+			kind:      attachmentVoice,
+			fileID:    message.Voice.FileID,
+			caption:   strings.TrimSpace(message.Caption),
+			extension: voiceExtensionFromMime(message.Voice.MimeType),
+			mimeType:  message.Voice.MimeType,
 		}, true, nil
 	}
 	if message.Document == nil {
@@ -310,6 +347,43 @@ func chooseDocumentExtension(preferred string, filePath string) string {
 		return extension
 	}
 	return ".bin"
+}
+
+func chooseVoiceExtension(preferred string, filePath string) string {
+	if strings.TrimSpace(preferred) != "" {
+		return preferred
+	}
+	if extension := strings.ToLower(filepath.Ext(filePath)); extension != "" {
+		return extension
+	}
+	return ".oga"
+}
+
+func prependCaption(caption string, text string) string {
+	caption = strings.TrimSpace(caption)
+	text = strings.TrimSpace(text)
+	if caption == "" {
+		return text
+	}
+	if text == "" {
+		return caption
+	}
+	return caption + "\n\n" + text
+}
+
+func voiceExtensionFromMime(mime string) string {
+	switch strings.ToLower(strings.TrimSpace(mime)) {
+	case "audio/ogg", "audio/opus":
+		return ".oga"
+	case "audio/mpeg":
+		return ".mp3"
+	case "audio/mp4", "audio/m4a", "audio/x-m4a":
+		return ".m4a"
+	case "audio/wav", "audio/x-wav":
+		return ".wav"
+	default:
+		return ".oga"
+	}
 }
 
 func (a *Adapter) handleCommand(ctx context.Context, text string) []string {

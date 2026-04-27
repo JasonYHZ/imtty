@@ -2,54 +2,35 @@
 
 [English](README.md) | 简体中文
 
-`imtty` 是一个 Telegram-first 的本地桥接器，用来从手机或任意 Telegram 客户端运行和控制本机 `tmux` 里的 Codex 会话。
+`imtty` 是一个个人使用的 Telegram 桥接器，用来从任意 Telegram 客户端控制本机 Codex 会话。
 
-它刻意保持窄范围：
+它让 Codex 继续运行在你自己的机器上、运行在 `tmux` 内，同时把 prompt、审批、媒体输入和最终回复通过 Telegram 传递。它面向单用户远程使用场景，不暴露原始 shell，也不把项目扩展成自主 agent 平台。
 
-- 单用户
-- 单机部署
-- Telegram 作为主要远程入口
-- `tmux` 作为唯一会话承载层
-- Codex 运行在 `tmux` 内
-- 保留 human-in-the-loop 审批流
+## 功能
 
-这个项目不是多用户 agent 平台，也不是托管控制面或通用文件同步产品。
+- 面向单 owner 的 Telegram webhook bridge
+- 基于 `tmux` 的 Codex 会话，会话名固定为 `codex-{project}`
+- Codex `app-server` 集成，使用结构化事件输出
+- Telegram 默认只返回 final answer，压制终端噪音
+- 保留显式人工审批，支持 `Yes` / `No` 快捷回复
+- 项目白名单，支持动态增删
+- bridge 重启后接管已有会话
+- 本地桌面可写 attach 冲突保护
+- Telegram Mini App companion UI，用于会话和项目控制
+- 支持 Telegram `photo` 和图片型 `document`
+- 支持文本、代码和 PDF 文件分析，文件只临时落地
+- 可选 Telegram `voice` 输入，通过本地 `ffmpeg` 和 `whisper.cpp` 转写
 
-## 当前状态
+## 非目标
 
-仓库已经有可运行基线，不只是设计文档。
+`imtty` 不做：
 
-当前已实现：
-
-- Telegram webhook bridge
-- `tmux` 会话生命周期管理
-- Codex `app-server` 集成
-- Telegram 默认只发 final answer
-- Telegram Mini App 控制面板
-- 动态项目白名单
-- 图片输入：
-  - Telegram `photo`
-  - 图片型 `document`
-- 文件分析输入：
-  - 文本和代码文件
-  - PDF 文本提取
-- turn 处理中 Telegram 原生 `typing`
-- bridge 重启后会话 reattach
-- 本地 attach 保护：
-  - 本地可写 attach 会阻断 Telegram 继续写入
-  - 本地只读旁观不会阻断 Telegram 继续写入
-
-## 解决的问题
-
-离开桌面后，你仍然可能想要：
-
-- 再给 Codex 发一条 prompt
-- 看最终回复
-- 批准命令或权限请求
-- 在多个项目会话之间切换
-- 用轻量 UI 查看和管理会话
-
-`imtty` 提供这些能力，但不会暴露原始 shell，也不会引入会改变 Codex 交互模型的自主编排层。
+- 托管服务
+- 多用户系统
+- agent 编排平台
+- 通用远程 shell
+- Web 后台管理面板
+- 文件同步或长期媒体存储
 
 ## 架构
 
@@ -59,139 +40,62 @@ Telegram -> imtty bridge -> tmux session -> Codex app-server
                               +-> Telegram Mini App
 ```
 
-关键设计选择：
+核心规则：
 
-- `tmux` 是唯一 session backend
-- Telegram 默认输出来自 Codex 结构化事件，而不是终端屏幕抓取
-- 审批保持显式
-- 一个 Telegram chat 任一时刻只绑定一个 active session
-- 可以同时存在多个 project session
-
-## 功能
-
-### 会话
-
-- `/open <project>` 创建或绑定 `codex-{project}`
-- `/open <project> <thread-id>` 严格恢复给定 Codex thread id，并将其绑定为该项目当前 thread
-- `/close` 解除当前 active session 绑定
-- `/kill` 终止底层会话并从已知会话列表删除
-- `/close` 会在解除绑定前回显当前 thread id
-- `/kill` 会在删除会话前回显当前 thread id
-- `/clear` 为当前 active session 立即创建一个新的空 thread，但不重建 tmux session
-- `/status` 查看当前 active session 详情和当前 Codex 窗口统计
-- `/list` 只列会话
-- `/projects` 只列允许打开的项目
-- `/model [model-id]` 查看或设置当前 active session 的模型覆盖
-- `/reasoning [effort]` 查看或设置当前 active session 的 reasoning 覆盖
-- `/plan_mode [default|plan]` 查看或设置当前 active session 的 bridge 侧计划预设
-
-### 项目白名单
-
-- `/project_add <name> <abs-path>`
-- `/project_remove <name>`
-- 动态项目会持久化到本地 `.imtty-projects.json`
-- 静态项目仍来自配置文件或环境变量
-
-### Telegram 聊天体验
-
-- 普通文本发到当前 active session
-- 提交成功默认静默
-- Codex 工作中 Telegram 会显示原生 `typing`
-- 默认只回 final answer、审批提示和必要状态
-- 终端噪音默认压制
-- model / reasoning / plan mode 的切换会先挂到当前 active session，并在下一条真实消息时生效
-- `/clear` 会立刻把当前 active session 切到新的空 thread，同时保留 tmux session 和当前 effective 控制状态
-- 本地可写 attach 会阻断远程写入和远程 `/kill`
-- 只读旁观命令：
-
-```bash
-tmux attach -r -t codex-<project>
-```
-
-### 图片输入
-
-支持：
-
-- Telegram `photo`
-- 图片型 `document`
-
-行为：
-
-- 下载到本机临时目录
-- 作为 `localImage` 提交给 Codex
-- caption 会和图片一起作为同一轮输入
-
-### 文件分析输入
-
-支持：
-
-- 文本文件
-- 代码文件
-- PDF 文档
-
-行为：
-
-- 文件下载到本机临时目录
-- 文本和代码文件直接读取内容，再作为文本输入发给 Codex
-- PDF 先在 bridge 本地提取文本，再作为文本输入发给 Codex
-- 不支持的二进制文件会被拒绝
-
-当前限制：
-
-- 不支持任意二进制附件
-- 第一版不做扫描版 PDF OCR
-- 不做长期媒体存储
-
-### Mini App
-
-Mini App 是 Telegram 内的轻量控制面板，不是第二个终端。
-
-当前支持：
-
-- 当前 active session
-- session 列表
-- project 列表
-- open / close / kill
-- project add / remove
-- bridge 主机目录浏览器，用于选择项目根目录
-
-当前不支持：
-
-- 实时终端输出
-- 自由文本 prompt 输入
-- 替代审批流
+- Telegram 是主要 IM 入口。
+- `tmux` 是唯一 session backend。
+- Codex 必须运行在 `tmux` session 内。
+- Telegram 输出来自 Codex 结构化事件，不读取终端屏幕。
+- 一个 Telegram chat 任一时刻只绑定一个 active session。
+- 可以同时存在多个 project session。
+- bridge 不会自动确认 Codex 审批。
 
 ## 运行要求
 
-本机已验证基线：
+已验证本机基线：
 
+- macOS
+- Go `1.26.1`
 - `tmux 3.6a`
 - `codex-cli 0.125.0`
-- `go 1.26.1`
-
-还需要：
-
 - Telegram bot token
-- Telegram 可访问的 HTTPS webhook 地址
-- `cloudflared` 或同类公网入口
+- Telegram 可访问的 HTTPS webhook 地址，例如 Cloudflare Tunnel
+
+可选语音输入：
+
+- `ffmpeg`
+- `whisper.cpp` 的 `whisper-cli`
+- 本地 GGML whisper 模型
 
 ## 快速开始
 
-### 1. 准备配置
+### 1. 创建配置
 
 ```bash
 cp config.toml.example config.toml
 ```
 
-至少要改这些字段：
+至少需要配置：
 
-- `telegram_bot_token`
-- `telegram_webhook_secret`
-- `telegram_owner_id`
-- `mini_app_base_url`
-- `[projects]`
+```toml
+telegram_bot_token = "BOT_TOKEN"
+telegram_webhook_secret = "SECRET"
+telegram_owner_id = 123456789
+mini_app_base_url = "https://imtty.example.com"
+
+[projects]
+demo = "/absolute/path/to/your/project"
+```
+
+`config.toml` 已被 git 忽略。只提交 `config.toml.example`，不要提交本机配置。
 
 ### 2. 启动 bridge
+
+```bash
+go run ./cmd/imtty-bridge
+```
+
+如果希望使用临时构建缓存：
 
 ```bash
 GOCACHE=/tmp/imtty-go-build go run ./cmd/imtty-bridge
@@ -203,36 +107,22 @@ GOCACHE=/tmp/imtty-go-build go run ./cmd/imtty-bridge
 curl -s http://127.0.0.1:8080/healthz
 ```
 
-### 3. 用 Cloudflare Tunnel 暴露公网入口
+### 3. 暴露 webhook
 
-长期运行建议使用 fixed hostname 的 named tunnel，例如 `imtty.example.com`。
-
-#### 3.1 登录 Cloudflare
+长期运行建议使用 named Cloudflare Tunnel：
 
 ```bash
 cloudflared tunnel login
-```
-
-#### 3.2 创建 named tunnel
-
-```bash
 cloudflared tunnel create imtty
-cloudflared tunnel list
-```
-
-记下 tunnel UUID 和 credentials 文件路径。
-
-#### 3.3 绑定固定域名
-
-```bash
 cloudflared tunnel route dns imtty imtty.example.com
+cloudflared tunnel run imtty
 ```
 
-#### 3.4 写入 `~/.cloudflared/config.yml`
+示例 `~/.cloudflared/config.yml`：
 
 ```yaml
 tunnel: imtty
-credentials-file: /Users/<you>/.cloudflared/<TUNNEL-UUID>.json
+credentials-file: /Users/<you>/.cloudflared/<tunnel-id>.json
 
 ingress:
   - hostname: imtty.example.com
@@ -240,35 +130,7 @@ ingress:
   - service: http_status:404
 ```
 
-#### 3.5 让 `imtty` 指向固定公网地址
-
-在 `config.toml` 里写：
-
-```toml
-mini_app_base_url = "https://imtty.example.com"
-```
-
-#### 3.6 启动 tunnel
-
-前台运行：
-
-```bash
-cloudflared tunnel run imtty
-```
-
-macOS 登录后自动启动：
-
-```bash
-cloudflared service install
-```
-
-macOS 开机自动启动：
-
-```bash
-sudo cloudflared service install
-```
-
-#### 3.7 设置 Telegram webhook
+设置 Telegram webhook：
 
 ```bash
 curl -X POST "https://api.telegram.org/bot${IMTTY_TELEGRAM_BOT_TOKEN}/setWebhook" \
@@ -279,113 +141,107 @@ curl -X POST "https://api.telegram.org/bot${IMTTY_TELEGRAM_BOT_TOKEN}/setWebhook
   }'
 ```
 
-#### 3.8 验证公网链路
+验证：
 
 ```bash
 curl -s "https://api.telegram.org/bot${IMTTY_TELEGRAM_BOT_TOKEN}/getWebhookInfo"
 curl -s http://127.0.0.1:8080/healthz
 ```
 
-期望结果：
-
-- webhook URL 是 `https://imtty.example.com/telegram/webhook`
-- 本地 `healthz` 返回 `ok`
-- bot 菜单按钮会打开 `https://imtty.example.com/mini-app`
-
-#### 3.9 仅开发阶段的 quick tunnel
-
-只在短期本地联调时使用：
-
-```bash
-cloudflared tunnel --url http://127.0.0.1:8080
-```
-
-如果 `trycloudflare.com` 域名变化，你必须重新更新：
-
-- Telegram webhook
-- Mini App 基础地址
-
-### 4. 开始和 bot 对话
-
-典型流程：
+### 4. 和 bot 对话
 
 ```text
 /projects
-/open my-project
+/open demo
 hello
 ```
 
-## 配置
+## 语音输入
 
-默认从当前工作目录读取 `config.toml`。
+语音输入默认关闭。配置本地转写器后再启用：
 
-可覆盖方式：
+```toml
+[voice]
+enabled = true
+ffmpeg_bin = "ffmpeg"
+whisper_bin = "/opt/whisper.cpp/build/bin/whisper-cli"
+model_path = "/opt/whisper.cpp/models/ggml-large-v3-turbo.bin"
+language = "zh"
+```
 
-- `-config /abs/path/to/config.toml`
-- `-listen :9090`
-- `IMTTY_*` 环境变量
+行为：
 
-注意：
+- Telegram `voice` 下载到本机临时目录。
+- `ffmpeg` 转成 16 kHz mono WAV。
+- `whisper.cpp` 在本机完成转写。
+- 转写文本按普通文本提交到当前 active Codex session。
+- bridge 不长期保存语音文件。
 
-- `config.toml` 已被 git 忽略
-- 只能提交 `config.toml.example`
+语音输入不包含语音命令、语音审批、说话人识别、长音频任务或多段合并。
 
-## 部署说明
+## Bot 命令
 
-- 长期运行请使用 named Cloudflare Tunnel + 固定域名
-- 建议使用子域名，例如 `imtty.example.com`，不要直接占用根域
-- `mini_app_base_url` 应与 tunnel 的公开地址保持一致
-- bridge 和 tunnel 是两个独立进程，重启一个不会自动重启另一个
-- 如果公网域名变化，需要同步刷新：
-  - Telegram webhook
-  - Mini App menu button 目标地址
+```text
+/list
+/projects
+/project_add <name> <abs-path>
+/project_remove <name>
+/open <project> [thread-id]
+/close
+/kill
+/clear
+/status
+/model [model-id]
+/reasoning [effort]
+/plan_mode [default|plan]
+```
 
-## 对外接口
+## Mini App
 
-### Bot 命令
+Mini App 是 Telegram 内的轻量 companion UI，支持：
 
-- `/list`
-- `/projects`
-- `/project_add <name> <abs-path>`
-- `/project_remove <name>`
-- `/open <project>`
-- `/open <project> <thread-id>`
-- `/close`
-- `/kill`
-- `/clear`
-- `/status`
-- `/model [model-id]`
-- `/reasoning [effort]`
-- `/plan_mode [default|plan]`
+- 当前 active session
+- session 列表
+- project 列表
+- open / close / kill 控制
+- project add / remove
+- bridge 主机目录浏览器，用于选择项目根目录
 
-### HTTP 接口
+它不替代 Telegram 聊天窗口、实时终端输出、自由文本输入或 Codex 审批流。
 
-- `POST /telegram/webhook`
-- `GET /healthz`
-- `GET /mini-app`
-- `GET/POST /mini-app/api/*`
+前端代码在 `web/mini-app/`。构建产物提交在 `web/mini-app/dist/`，Go bridge 会直接提供这些静态文件。
 
-## 安全模型
+## 开发
 
-这个项目面向“用户本人控制的单机”场景。
+运行 Go 测试：
 
-当前保护措施：
+```bash
+GOPATH=/tmp/imtty-go GOMODCACHE=/tmp/imtty-go/pkg/mod GOCACHE=/tmp/imtty-go-build go test ./...
+```
 
-- Telegram webhook secret 校验
-- Mini App `initData` + owner 校验
-- 项目白名单
-- 本地可写 attach 冲突保护
-- 临时媒体文件不进入项目目录
+构建 Mini App：
+
+```bash
+cd web/mini-app
+npm install
+npm run build
+```
+
+## 安全说明
+
+- 只能打开项目白名单内的路径。
+- Telegram webhook 请求必须携带配置的 secret token。
+- Mini App 请求必须通过 Telegram `initData` 校验和 owner 校验。
+- 图片、文件和语音只作为本机临时文件保存。
+- 当同一 `tmux` session 被本地桌面可写 attach 时，bridge 会拒绝 Telegram 写入和 `/kill`。
+- bridge 不会自动确认 Codex 权限审批。
 
 ## 更多文档
 
 - [Product Requirements](docs/prd.md)
 - [MVP Architecture Runbook](docs/mvp-architecture-runbook.md)
-- [Mini App design spec](docs/superpowers/specs/2026-04-25-imtty-mini-app-design.md)
-- [App-server rewrite design](docs/superpowers/specs/2026-04-25-imtty-app-server-rewrite-design.md)
-
-Mini App 前端在 `web/mini-app/`，构建产物在 `web/mini-app/dist/`。Go bridge 直接把 `dist` 当静态目录提供；`npm run build` 后刷新 Mini App 即可读取新文件，不需要因为前端静态文件变化而重启 bridge。当前 Mini App 是纯静态前端构建，运行时通过 `/mini-app/api/*` 调用 bridge。
+- [Guardrails](AGENTS.md)
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+[MIT](LICENSE)

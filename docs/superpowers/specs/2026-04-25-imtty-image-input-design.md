@@ -25,7 +25,8 @@
 不做：
 
 - 多图消息
-- 视频 / GIF / sticker / 语音
+- 视频 / GIF / sticker
+- 语音输入另见 PRD 和 MVP runbook 的 voice 边界
 - OCR
 - 图片长期留档
 - Mini App 图片上传

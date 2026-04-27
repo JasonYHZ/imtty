@@ -344,6 +344,13 @@ func (c *Client) readLoop() {
 
 		var envelope rpcEnvelope
 		if err := conn.ReadJSON(&envelope); err != nil {
+			if !c.isClosed() {
+				c.markDisconnected(conn)
+				c.emitEvent(Event{
+					Kind: EventConnectionClosed,
+					Text: "Codex app-server 连接已断开",
+				})
+			}
 			return
 		}
 
@@ -360,6 +367,20 @@ func (c *Client) readLoop() {
 			responseCh <- envelope
 		}
 	}
+}
+
+func (c *Client) markDisconnected(conn *websocket.Conn) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.conn == conn {
+		c.conn = nil
+	}
+}
+
+func (c *Client) isClosed() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.closed
 }
 
 func (c *Client) handleInboundRequestOrNotification(envelope rpcEnvelope) {
@@ -408,15 +429,44 @@ func (c *Client) handleInboundRequestOrNotification(envelope rpcEnvelope) {
 	itemType, _ := item["type"].(string)
 	phase, _ := item["phase"].(string)
 	text, _ := item["text"].(string)
+	if (itemType == "error" || phase == "error") && strings.TrimSpace(turnErrorText(item)) != "" {
+		c.emitEvent(Event{
+			Kind: EventTurnError,
+			Text: turnErrorText(item),
+		})
+		return
+	}
 	if itemType == "agentMessage" && phase == string(EventFinalAnswer) {
 		if isMemoryMaintenanceReport(text) {
 			return
 		}
-		c.events <- Event{
+		c.emitEvent(Event{
 			Kind: EventFinalAnswer,
 			Text: text,
+		})
+	}
+}
+
+func (c *Client) emitEvent(event Event) {
+	select {
+	case c.events <- event:
+	default:
+	}
+}
+
+func turnErrorText(item map[string]any) string {
+	if text := stringValue(item["text"]); text != "" {
+		return text
+	}
+	if message := stringValue(item["message"]); message != "" {
+		return message
+	}
+	if errorMap, ok := objectField(item, "error"); ok {
+		if message := stringValue(errorMap["message"]); message != "" {
+			return message
 		}
 	}
+	return "Codex 会话异常中断"
 }
 
 func isApprovalMethod(method string) bool {

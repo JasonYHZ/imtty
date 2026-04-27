@@ -17,6 +17,7 @@ import (
 	"imtty/internal/stream"
 	"imtty/internal/telegram"
 	"imtty/internal/tmux"
+	"imtty/internal/voice"
 )
 
 func main() {
@@ -51,6 +52,19 @@ func main() {
 	documentAnalyzer := fileinput.NewAnalyzer(nil, 0, 0)
 	runtime := appserver.NewRuntime(sessionManager, stream.NewFormatter(cfg.MessageChunkBytes), botClient, cfg.CodexBin, cfg.PlanModeReasoning)
 	adapter := telegram.NewAdapter(registry, runtime, projectStore, botClient, mediaStore, documentAnalyzer)
+	if cfg.Voice.Enabled {
+		transcriber, err := voice.NewWhisperCPPTranscriber(voice.Config{
+			FFmpegBin:  cfg.Voice.FFmpegBin,
+			WhisperBin: cfg.Voice.WhisperBin,
+			ModelPath:  cfg.Voice.ModelPath,
+			Language:   cfg.Voice.Language,
+		})
+		if err != nil {
+			log.Fatalf("configure voice transcriber: %v", err)
+		}
+		adapter.SetVoiceTranscriber(transcriber)
+		log.Printf("voice transcription enabled with model %s", cfg.Voice.ModelPath)
+	}
 
 	var miniAppFS fs.FS
 	staticFS, err := miniapp.StaticAssetsFromDir("web/mini-app/dist")
