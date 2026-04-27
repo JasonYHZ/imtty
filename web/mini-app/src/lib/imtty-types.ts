@@ -6,7 +6,7 @@ export type ModelId = string
 
 export type Reasoning = string
 
-export type PlanMode = "default" | "plan"
+export type PlanMode = "default" | "plan" | "custom"
 
 export interface Project {
   id: string
@@ -29,6 +29,13 @@ export interface Session {
   model: ModelId
   reasoning: Reasoning
   planMode: PlanMode
+  effectiveModel: ModelId
+  effectiveReasoning: Reasoning
+  effectivePlanMode: PlanMode
+  pendingModel: ModelId
+  pendingReasoning: Reasoning
+  pendingPlanMode: PlanMode | ""
+  hasPendingControls: boolean
   /** Tokens used in the current context window. */
   tokenUsage: number
   /** Total context window size. */

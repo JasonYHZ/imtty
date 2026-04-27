@@ -14,7 +14,7 @@ import {
   type StatusView,
 } from "@/lib/api"
 import { getTelegramWebApp } from "@/lib/telegram"
-import type { ModelOption, Project, Session, SessionStatus } from "@/lib/imtty-types"
+import type { ModelOption, PlanMode, Project, Session, SessionStatus } from "@/lib/imtty-types"
 import { Toaster } from "@/components/ui/sonner"
 import { CurrentSession } from "@/components/imtty/current-session"
 import { SessionSettings } from "@/components/imtty/session-settings"
@@ -227,6 +227,8 @@ function toProject(project: ProjectView): Project {
 
 function toSession(session: SessionView, status?: StatusView): Session {
   const effective = status?.effective
+  const pending = status?.pending
+  const target = status?.target
   const usage = status?.token_usage
   const tokenLimit = usage?.context_window && usage.context_window > 0 ? usage.context_window : 1
   return {
@@ -238,11 +240,29 @@ function toSession(session: SessionView, status?: StatusView): Session {
     status: toSessionStatus(session.state),
     threadId: status?.thread_id || "未读取",
     branch: status?.branch || "-",
-    model: effective?.model || "未读取",
-    reasoning: effective?.reasoning || "未读取",
-    planMode: effective?.plan_mode === "plan" ? "plan" : "default",
+    model: target?.model || effective?.model || "未读取",
+    reasoning: target?.reasoning || effective?.reasoning || "未读取",
+    planMode: toPlanMode(target?.plan_mode || effective?.plan_mode),
+    effectiveModel: effective?.model || "未读取",
+    effectiveReasoning: effective?.reasoning || "未读取",
+    effectivePlanMode: toPlanMode(effective?.plan_mode),
+    pendingModel: pending?.model || "",
+    pendingReasoning: pending?.reasoning || "",
+    pendingPlanMode: pending?.plan_mode ? toPlanMode(pending.plan_mode) : "",
+    hasPendingControls: status?.has_pending_controls ?? false,
     tokenUsage: usage?.total_tokens ?? 0,
     tokenLimit,
+  }
+}
+
+function toPlanMode(mode?: string): PlanMode {
+  switch (mode) {
+    case "plan":
+      return "plan"
+    case "custom":
+      return "custom"
+    default:
+      return "default"
   }
 }
 

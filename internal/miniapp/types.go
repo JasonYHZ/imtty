@@ -71,6 +71,8 @@ type StatusView struct {
 	CodexVersion        string               `json:"codex_version,omitempty"`
 	Effective           ControlSelectionView `json:"effective"`
 	Pending             ControlSelectionView `json:"pending"`
+	Target              ControlSelectionView `json:"target"`
+	HasPendingControls  bool                 `json:"has_pending_controls"`
 	TokenUsage          TokenUsageView       `json:"token_usage"`
 	HasTokenUsage       bool                 `json:"has_token_usage"`
 	LocalWritableAttach bool                 `json:"local_writable_attach"`

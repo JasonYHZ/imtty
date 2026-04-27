@@ -70,6 +70,8 @@ Mini App 首页采用单页布局，分 4 个区块。
 - active session 名称
 - project 名称
 - 当前状态
+- 已生效的 model / reasoning / plan mode
+- 如果存在待生效设置，展示待生效 model / reasoning / plan mode 提示
 
 动作：
 
@@ -94,9 +96,9 @@ Mini App 首页采用单页布局，分 4 个区块。
 
 显示：
 
-- 当前 model
-- 当前 reasoning
-- 当前 plan mode
+- 目标 model
+- 目标 reasoning
+- 目标 plan mode
 
 动作：
 
@@ -105,6 +107,8 @@ Mini App 首页采用单页布局，分 4 个区块。
 - 切换 plan mode
 
 所有设置只对当前 active session 生效，并在下一条真实消息时应用。
+
+设置区的选中值使用 `target`：如果存在 pending 设置，优先显示 pending；否则显示 effective。当前会话区必须同时保留 effective 展示和 pending 提示，避免把“待生效”误表现为“未更新”。
 
 ### 4.3 项目列表
 
@@ -187,6 +191,13 @@ Mini App 不做多页面路由。
 - `browse_shortcuts`
 - `active_status`
 - `models`
+
+`active_status` 中控制状态语义：
+
+- `effective`: 当前已经应用到 Codex 会话的 model / reasoning / plan mode。
+- `pending`: 已设置但要等下一条真实消息才会应用的 model / reasoning / plan mode。
+- `target`: Mini App 控件应选中的目标值，按 pending 优先、effective 兜底计算。
+- `has_pending_controls`: 是否存在待生效控制项。
 
 `POST /mini-app/api/open` 请求体：
 

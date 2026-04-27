@@ -32,6 +32,7 @@ import { StatusBadge } from "./status-badge"
 const PLAN_MODE_LABEL: Record<Session["planMode"], string> = {
   default: "默认",
   plan: "Plan",
+  custom: "自定义",
 }
 
 function formatTokens(value: number) {
@@ -67,6 +68,20 @@ function DetailRow({
       </span>
     </div>
   )
+}
+
+function pendingSummary(session: Session) {
+  const items: string[] = []
+  if (session.pendingModel) {
+    items.push(`模型 ${session.pendingModel}`)
+  }
+  if (session.pendingReasoning) {
+    items.push(`推理 ${reasoningLabel(session.pendingReasoning)}`)
+  }
+  if (session.pendingPlanMode) {
+    items.push(`模式 ${PLAN_MODE_LABEL[session.pendingPlanMode]}`)
+  }
+  return items.join(" / ")
 }
 
 export function CurrentSession({
@@ -146,13 +161,13 @@ export function CurrentSession({
         <div className="mt-4 divide-y rounded-md border bg-muted/30">
           <div className="grid grid-cols-2 divide-x">
             <div className="px-3 py-1.5">
-              <DetailRow icon={Cpu} label="模型" value={session.model || "未读取"} />
+              <DetailRow icon={Cpu} label="当前模型" value={session.effectiveModel || "未读取"} />
             </div>
             <div className="px-3 py-1.5">
               <DetailRow
                 icon={Brain}
-                label="推理"
-                value={reasoningLabel(session.reasoning)}
+                label="当前推理"
+                value={reasoningLabel(session.effectiveReasoning)}
               />
             </div>
           </div>
@@ -160,8 +175,8 @@ export function CurrentSession({
             <div className="px-3 py-1.5">
               <DetailRow
                 icon={Sparkles}
-                label="模式"
-                value={PLAN_MODE_LABEL[session.planMode]}
+                label="当前模式"
+                value={PLAN_MODE_LABEL[session.effectivePlanMode]}
               />
             </div>
             <div className="px-3 py-1.5">
@@ -172,6 +187,14 @@ export function CurrentSession({
             <DetailRow icon={Hash} label="Thread" value={session.threadId} mono />
           </div>
         </div>
+
+        {session.hasPendingControls ? (
+          <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs leading-relaxed text-blue-800">
+            <span className="font-medium">待生效：</span>
+            {pendingSummary(session) || "已设置新的会话参数"}
+            <span className="block text-blue-700/80">下一条发送给 Codex 的消息会应用这些设置。</span>
+          </div>
+        ) : null}
 
         <div className="mt-3 flex flex-col gap-1.5">
           <div className="flex items-center justify-between text-[11px]">

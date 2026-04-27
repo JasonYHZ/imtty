@@ -215,6 +215,73 @@ func TestHandlerControlActionsUseAdapterCommands(t *testing.T) {
 	}
 }
 
+func TestHandlerBootstrapReturnsTargetControlsFromPendingState(t *testing.T) {
+	registry := session.NewRegistry(map[string]string{
+		"project-a": "/tmp/project-a",
+	})
+	runtime := &fakeSessionRuntime{
+		status: session.Status{
+			Effective: session.ControlSelection{
+				Model:     "gpt-5.5",
+				Reasoning: "high",
+				PlanMode:  session.PlanModeDefault,
+			},
+			Pending: session.ControlSelection{
+				Model:     "gpt-5.4",
+				Reasoning: "xhigh",
+				PlanMode:  session.PlanModePlan,
+			},
+			TokenUsage:    session.TokenUsage{ContextWindow: 258000, TotalTokens: 188000},
+			HasTokenUsage: true,
+		},
+	}
+	adapter := telegram.NewAdapter(registry, runtime, &fakeProjectStore{}, nil, nil, nil)
+	view, err := registry.Open("project-a")
+	if err != nil {
+		t.Fatalf("registry.Open(project-a) error = %v", err)
+	}
+	if _, err := registry.SetState(view.Project, session.StateRunning); err != nil {
+		t.Fatalf("registry.SetState(project-a) error = %v", err)
+	}
+	handler := NewHandler(Options{
+		BotToken: "bot-token",
+		OwnerID:  42,
+		Registry: registry,
+		Adapter:  adapter,
+		Runtime:  runtime,
+	})
+
+	request := httptest.NewRequest(http.MethodGet, "/mini-app/api/bootstrap", nil)
+	request.Header.Set("X-Telegram-Init-Data", signedInitData(t, "bot-token", 42, "jason", time.Unix(1_700_000_000, 0)))
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d body=%s", recorder.Code, http.StatusOK, recorder.Body.String())
+	}
+
+	var response BootstrapResponse
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v", err)
+	}
+
+	if response.ActiveStatus == nil {
+		t.Fatal("ActiveStatus = nil, want runtime status")
+	}
+	if response.ActiveStatus.Target.Model != "gpt-5.4" {
+		t.Fatalf("Target.Model = %q, want pending model gpt-5.4", response.ActiveStatus.Target.Model)
+	}
+	if response.ActiveStatus.Target.Reasoning != "xhigh" {
+		t.Fatalf("Target.Reasoning = %q, want pending reasoning xhigh", response.ActiveStatus.Target.Reasoning)
+	}
+	if response.ActiveStatus.Target.PlanMode != "plan" {
+		t.Fatalf("Target.PlanMode = %q, want pending plan", response.ActiveStatus.Target.PlanMode)
+	}
+	if !response.ActiveStatus.HasPendingControls {
+		t.Fatal("HasPendingControls = false, want true")
+	}
+}
+
 func TestHandlerServesStaticMiniAppAssets(t *testing.T) {
 	staticFS := fstest.MapFS{
 		"index.html":     {Data: []byte("<html>old mini app</html>")},
@@ -346,6 +413,7 @@ type fakeSessionRuntime struct {
 	closed    []string
 	killed    []string
 	submitted map[string][]string
+	status    session.Status
 }
 
 func (f *fakeSessionRuntime) OpenSession(_ context.Context, chatID int64, view session.View) error {
@@ -383,6 +451,20 @@ func (f *fakeSessionRuntime) SubmitApproval(_ context.Context, _ int64, _ sessio
 }
 
 func (f *fakeSessionRuntime) Status(_ context.Context, view session.View) (session.Status, error) {
+	if f.status != (session.Status{}) {
+		status := f.status
+		status.View = view
+		if status.Cwd == "" {
+			status.Cwd = view.Root
+		}
+		if status.ThreadID == "" {
+			status.ThreadID = "thread-123"
+		}
+		if status.CodexVersion == "" {
+			status.CodexVersion = "0.125.0"
+		}
+		return status, nil
+	}
 	return session.Status{
 		View: view,
 		Effective: session.ControlSelection{

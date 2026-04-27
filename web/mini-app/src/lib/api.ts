@@ -48,6 +48,12 @@ export interface StatusView {
     reasoning?: string
     plan_mode?: string
   }
+  target: {
+    model?: string
+    reasoning?: string
+    plan_mode?: string
+  }
+  has_pending_controls: boolean
   token_usage: {
     context_window: number
     total_tokens: number

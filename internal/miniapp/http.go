@@ -200,6 +200,7 @@ func buildBootstrap(ctx context.Context, registry *session.Registry, runtime tel
 }
 
 func toStatusView(status session.Status) StatusView {
+	hasPendingControls := status.Pending.Model != "" || status.Pending.Reasoning != "" || status.Pending.PlanMode != ""
 	return StatusView{
 		ThreadID:     status.ThreadID,
 		Cwd:          status.Cwd,
@@ -215,6 +216,12 @@ func toStatusView(status session.Status) StatusView {
 			Reasoning: status.Pending.Reasoning,
 			PlanMode:  string(status.Pending.PlanMode),
 		},
+		Target: ControlSelectionView{
+			Model:     coalesceControl(status.Pending.Model, status.Effective.Model),
+			Reasoning: coalesceControl(status.Pending.Reasoning, status.Effective.Reasoning),
+			PlanMode:  coalesceControl(string(status.Pending.PlanMode), string(status.Effective.PlanMode)),
+		},
+		HasPendingControls: hasPendingControls,
 		TokenUsage: TokenUsageView{
 			ContextWindow: status.TokenUsage.ContextWindow,
 			TotalTokens:   status.TokenUsage.TotalTokens,
@@ -222,6 +229,13 @@ func toStatusView(status session.Status) StatusView {
 		HasTokenUsage:       status.HasTokenUsage,
 		LocalWritableAttach: status.LocalWritableAttach,
 	}
+}
+
+func coalesceControl(pending string, effective string) string {
+	if pending != "" {
+		return pending
+	}
+	return effective
 }
 
 func toModelViews(models []appserver.ModelInfo) []ModelView {
