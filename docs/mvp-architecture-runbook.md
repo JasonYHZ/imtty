@@ -208,6 +208,11 @@ MVP 不引入数据库、消息队列或第二套 session backend。
 6. 命令只更新当前 session 的 pending 控制状态，不会伪造空 turn。
 7. 下一条真实用户输入进入 `turn/start` 时，pending model / effort 一并覆盖到底层会话，并提升为 effective 状态。
 
+兼容性规则：
+
+- 如果 app-server `model/list` 返回了 `supportedReasoningEfforts`，bridge 必须按该列表校验 reasoning。
+- 如果 app-server 省略或返回空的 `supportedReasoningEfforts`，bridge 只能把它解释为“能力列表未知”，不能解释为“不支持任何 reasoning”；此时只按 Codex 已知 effort 名称校验输入。
+
 ### 5.2.2 图片消息
 
 1. Telegram webhook adapter 识别 `photo` 或图片型 `document`。

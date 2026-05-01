@@ -453,6 +453,58 @@ func TestRuntimeAppliesPendingControlsOnNextTurnAndTracksTokenUsage(t *testing.T
 	}
 }
 
+func TestRuntimeSetPlanModeAcceptsConfiguredReasoningWhenSupportedEffortsOmitted(t *testing.T) {
+	server := newFakeAppServer(t)
+	defer server.Close()
+
+	server.onRequest("initialize", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{"protocolVersion": 1})
+	})
+	server.onRequest("thread/start", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{
+			"thread":          map[string]any{"id": "thread-123"},
+			"cwd":             "/tmp/project-a",
+			"model":           "gpt-5.5",
+			"reasoningEffort": "high",
+		})
+	})
+	server.onRequest("model/list", func(conn *websocket.Conn, request rpcRequest) {
+		server.reply(conn, request.ID, map[string]any{
+			"data": []map[string]any{{
+				"id":                     "gpt-5.5",
+				"model":                  "gpt-5.5",
+				"displayName":            "GPT-5.5",
+				"defaultReasoningEffort": "medium",
+			}},
+		})
+	})
+
+	wsURL, err := url.Parse(server.wsURL())
+	if err != nil {
+		t.Fatalf("url.Parse() error = %v", err)
+	}
+	port, err := strconv.Atoi(wsURL.Port())
+	if err != nil {
+		t.Fatalf("Atoi(port) error = %v", err)
+	}
+
+	host := &fakeSessionHost{meta: tmux.SessionRuntimeInfo{Port: port}}
+	runtime := NewRuntime(host, stream.NewFormatter(3500), &fakeRuntimeSender{}, "codex", "xhigh")
+	view := session.View{Name: "codex-project-a", Project: "project-a", Root: "/tmp/project-a", State: session.StateRunning}
+	if err := runtime.OpenSession(context.Background(), 42, view); err != nil {
+		t.Fatalf("OpenSession() error = %v", err)
+	}
+	defer runtime.CloseSession(view.Name)
+
+	status, err := runtime.SetPlanMode(context.Background(), view, session.PlanModePlan)
+	if err != nil {
+		t.Fatalf("SetPlanMode() error = %v", err)
+	}
+	if status.Pending.Reasoning != "xhigh" || status.Pending.PlanMode != session.PlanModePlan {
+		t.Fatalf("Pending = %#v, want plan/xhigh pending", status.Pending)
+	}
+}
+
 func TestRuntimeClearThreadStartsFreshThreadAndResetsSnapshot(t *testing.T) {
 	server := newFakeAppServer(t)
 	defer server.Close()

@@ -735,12 +735,24 @@ func findModel(models []ModelInfo, wanted string) (ModelInfo, bool) {
 }
 
 func supportsReasoning(model ModelInfo, reasoning string) bool {
+	if len(model.Supported) == 0 {
+		return isKnownReasoningEffort(reasoning)
+	}
 	for _, option := range model.Supported {
 		if option == reasoning {
 			return true
 		}
 	}
 	return false
+}
+
+func isKnownReasoningEffort(reasoning string) bool {
+	switch strings.TrimSpace(reasoning) {
+	case "minimal", "low", "medium", "high", "xhigh":
+		return true
+	default:
+		return false
+	}
 }
 
 func effectiveOrPendingModel(live *liveSession) string {
